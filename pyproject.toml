@@ -1,18 +1,46 @@
 [tool.poetry]
-name = "wmproto"
-version = "0.1.1"
+name = "almanet"
+version = "0.2.0"
 description = "Web Messaging Protocol"
-authors = ["aturkenov <a.k.turken0v@gmail.com>"]
+authors = ["aturkenov"]
 readme = "README.md"
+license = "MIT"
+keywords = ["Almanet", "PubSub", "RPC"]
+homepage = "https://github.com/aturkenov/almanet"
+documentation = "https://github.com/aturkenov/almanet"
+repository = "https://github.com/aturkenov/almanet"
+classifiers = [
+    "Topic :: System :: Distributed Computing",
+    "Topic :: Software Development :: Object Brokering",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Framework :: Almanet"
+]
+packages = [
+    { include = "almanet" },
+]
 
 [tool.poetry.dependencies]
 python = "^3.12"
 ansq = "^0.3.0"
-
+pydantic = "^2.7.1"
 
 [tool.poetry.group.dev.dependencies]
 uvloop = "^0.19.0"
+fastapi = "^0.110.3"
+uvicorn = "^0.29.0"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.ruff.lint]
+ignore = ["E731"]

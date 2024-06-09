@@ -1,17 +1,34 @@
-import uvloop
+import asyncio
 
-import wmproto
+import almanet
 
+from examples import flow
 
 async def main():
-    session = await wmproto.join('localhost:4150')
+    # create new session
+    session = almanet.new_session("localhost:4150")
 
-    print(f'joined session.id={session.ID}')
+    # join to your nsq network.
+    async with session:
+        print(f"joined session.id={session.id}")
 
-    result = await wmproto.call(session, 'net.example.greeting', 'Aidar')
-    print('result', result.payload)
+        # calling the procedure `net.examples.greeting` with "Aidar" argument
+        result = await session.call("net.example.greeting", "Aidar")
+        # invocation result in `.payload` attribute.
+        print("result", result.payload)
 
-    await wmproto.leave(session)
+        # catching rpc exceptions with `try` and `except almanet.rpc_error` statement
+        # validation error
+        try:
+            await session.call("net.example.greeting", 123)
+        except almanet.rpc_error as e:
+            print("during call net.example.greeting(123):", e)
+        # custom exception
+        try:
+            await session.call("net.example.greeting", "guest")
+        except almanet.rpc_error as e:
+            print("during call net.example.greeting('guest'):", e)
 
+        await flow.create(session, "Aidar")
 
-uvloop.run(main())
+asyncio.run(main())

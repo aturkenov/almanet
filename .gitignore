@@ -1,5 +1,15 @@
 .vscode/
 .idea/
 
+.DS_Store
+
 __pycache__/
-dist/
+
+nsqd.dat
+
+# Logs
+*.log
+
+node_modules/
+build/
+.vite/
