@@ -248,7 +248,7 @@ class Almanet:
     ) -> returns_consumer[T]:
         """
         Consume messages from a message broker with the specified topic and channel.
-        It returns a tuple of a stream of messages and a stop consumer function.
+        It returns a tuple of a stream of messages and a function that can stop consumer.
         """
         logger.debug(f"trying to consume {topic}/{channel}")
 

@@ -1,91 +1,113 @@
-# Almanet
+# almanet
 
 Web Messaging Protocol is an open application level protocol that provides two messaging patterns:
 - Routed Remote Procedure Calls (RPC)
 - Produce & Consume
 
-NSQ is a realtime distributed message broker [(read more here)](https://nsq.io/).
-And Almanet uses NSQ to exchange messages between different sessions.
+[NSQ](https://nsq.io/) is a realtime distributed queue like message broker.
 
-[See more examples here.](/examples)
+Almanet uses NSQ to exchange messages between different sessions.
 
-## Getting Started
+## Quick Start
 
-Before install and run NSQD instance using this [instruction](https://nsq.io/overview/quick_start.html).
+Before install and run NSQD instance [using this instruction](https://nsq.io/overview/quick_start.html).
 
-Create a new session
-```python
-session = almanet.new_session()
+Then install [`almanet` PyPI package](https://pypi.org/project/almanet/)
+
+```sh
+pip install almanet
 ```
 
-Join to your nsq network
+or
+
+```sh
+poetry add almanet
+```
+
+Create a new file and
+
 ```python
-await session.join(<your nsqd tcp addresses>)
+import almanet
+```
+
+<details>
+<summary>
+<h3 id="create-microservice">Create your own Microservice</h3>
+</summary>
+
+Define your custom microservice
+```python
+example_service = almanet.new_service(
+    <your nsqd tcp addresses>,
+    prefix='net.example'
+)
 ```
 
 Define your custom exception
 ```python
-class Denied(almanet.rpc_error):
+class denied(almanet.rpc_error):
     """Custom RPC exception"""
 ```
 
 Define your remote procedure to call
 ```python
-# First argument is a payload that was passed during invocation.
-async def greeting(payload: str, **kwargs):
+@example_service.procedure
+async def greeting(
+    payload: str,  # is a data that was passed during invocation
+    **kwargs,
+) -> str:
     """Procedure that returns greeting message"""
     if payload == 'guest':
         # you can raise custom exceptions and the caller will have an error
-        raise Denied()
+        raise denied()
     return f'Hello, {payload}!'
 ```
 
-Register your procedure in order to be called
+At the end of file
 ```python
-await session.register('net.example.greeting', greeting)
+if __name__ == '__main__':
+    example_service.serve()
 ```
 
-Call the procedure `net.examples.greeting` with 'Aidar' argument.
-Raises `TimeoutError` if procedure not found or request timed out.
+Finally run your module using the python command
+</details>
+
+<details>
+<summary>
+<h3 id="call-microservice">Call your Microservice</h3>
+</summary>
+
+Create a new session
 ```python
-result = await session.call('net.example.greeting', 'Aidar')
-print(result.payload)
+session = almanet.new_session(<your nsqd tcp addresses>)
 ```
 
-Or catch remote procedure exceptions
+Then call the required remote procedure
 ```python
-try:
-    await session.call('net.example.greeting', 'guest')
-except almanet.rpc_error as e:
-    print('during call net.example.greeting("guest"):', e)
+async with session:
+    # Calling the `net.examples.greeting` procedure with 'Aidar' payload.
+    # Raises `TimeoutError` if procedure not found or request timed out.
+    result = await session.call('net.example.greeting', 'Aidar')
+    print(result.payload)  # contains the result of the procedure execution
 ```
 
-Create `net.example.notification` consumer.
-`almanet.consume` returns tuple[iterable messages, function that can stop consuming]
+Catching remote procedure exceptions
 ```python
-messages_stream, stop_consumer = await session.consume(
-    'net.example.notification', channel='test'
-)
-```
-
-Start consuming messages and commit or rollback incoming message
-```python
-async for message in messages_stream:
+async with session:
     try:
-        print('new event', message.body)
-        # at the end of iteration commit message
-        await message.commit()
-    except:
-        # if something went wrong
-        await message.rollback()
+        await session.call('net.example.greeting', 'guest')
+    except almanet.rpc_error as e:
+        print('during call net.example.greeting("guest"):', e)
 ```
 
-Publish message to `net.example.notification` topic with 'hello, world' argument
-```python
-await session.produce('net.example.notification', 'hello, world')
-```
+Finally run your module using the python command
+</details>
 
-Leave from network
-```python
-await session.leave()
-```
+See the full examples in [`./examples`](/examples) directory.
+
+<style>
+h3 {
+    display: inline-block;
+    margin: 0;
+}
+</style>
