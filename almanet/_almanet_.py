@@ -23,6 +23,10 @@ logger.setLevel(logging.INFO)
 
 @_shared_.dataclass(slots=True)
 class qmessage_model[T: typing.Any]:
+    """
+    Represents a message in the queue.
+    """
+
     id: str
     timestamp: int
     body: T
@@ -35,6 +39,10 @@ type returns_consumer[T: typing.Any] = tuple[typing.AsyncIterable[qmessage_model
 
 
 class client_iface(typing.Protocol):
+    """
+    Interface for a client library.
+    """
+
     async def connect(
         self,
         addresses: typing.Sequence[str],
@@ -61,6 +69,10 @@ class client_iface(typing.Protocol):
 
 @_shared_.dataclass(slots=True)
 class invoke_event_model[T: typing.Any]:
+    """
+    Represents an invocation event.
+    """
+
     id: str
     caller_id: str
     payload: T
@@ -74,12 +86,21 @@ class invoke_event_model[T: typing.Any]:
 
 @_shared_.dataclass(slots=True)
 class reply_event_model[T: typing.Any]:
+    """
+    Represents a reply event.
+    """
+
     call_id: str
     is_error: bool
     payload: T
 
 
 class rpc_error(Exception):
+    """
+    Represents an RPC error.
+    You can inherit from this class to create your own error.
+    """
+
     __slots__ = ("name", "args")
 
     def __init__(
@@ -96,6 +117,10 @@ class rpc_error(Exception):
 
 @_shared_.dataclass(slots=True)
 class registration_model:
+    """
+    Represents a registered procedure to call.
+    """
+
     topic: str
     channel: str
     procedure: typing.Callable
@@ -189,6 +214,9 @@ class Almanet:
         self,
         *args: typing.Unpack[__produce_args],
     ) -> asyncio.Task[None]:
+        """
+        Produce a message with a specified topic and payload.
+        """
         return self.task_pool.schedule(
             self.__produce(*args)
         )
@@ -216,6 +244,10 @@ class Almanet:
         *,
         payload_model: type[T] | typing.Any = ...,
     ) -> returns_consumer[T]:
+        """
+        Consume messages from a message broker with the specified topic and channel.
+        It returns a tuple of a stream of messages and a stop consumer function.
+        """
         logger.debug(f"trying to consume {topic}/{channel}")
 
         messages_stream, stop_consumer = await self._client.consume(topic, channel)
@@ -303,6 +335,10 @@ class Almanet:
         *args: typing.Unpack[__call_args],
         **kwargs: typing.Unpack[__call_kwargs],
     ) -> asyncio.Task[reply_event_model]:
+        """
+        Call a procedure with a specified topic and payload.
+        Returns a reply event.
+        """
         return self.task_pool.schedule(
             self.__call(*args, **kwargs)
         )
@@ -355,6 +391,10 @@ class Almanet:
         *args: typing.Unpack[__multicall_args],
         **kwargs: typing.Unpack[__multicall_kwargs],
     ) -> asyncio.Task[list[reply_event_model]]:
+        """
+        Call simultaneously multiple procedures with a specified topic and payload.
+        Returns a list of reply events.
+        """
         return self.task_pool.schedule(
             self.__multicall(*args, **kwargs)
         )
@@ -392,6 +432,10 @@ class Almanet:
         *,
         channel: str | None = None,
     ) -> registration_model:
+        """
+        Register a procedure with a specified topic and payload.
+        Returns the created registration.
+        """
         r = registration_model(
             topic=f"_rpc_.{topic}",
             channel=channel,  # type: ignore
@@ -399,15 +443,19 @@ class Almanet:
             session=self,
         )
 
+        # schedules a task in the task_pool to consume invocations for this registration.
         self.task_pool.schedule(self._consume_invocations(r))
 
         return r
 
     async def join(self) -> None:
+        """
+        Join the session to message broker.
+        """
         if self.joined:
-            raise RuntimeError("session already joined")
+            raise RuntimeError(f"session {self.id} already joined")
 
-        logger.debug(f"session {self.id} trying to connect addresses={self.addresses}")
+        logger.debug(f"trying to connect addresses={self.addresses}")
 
         await self._client.connect(self.addresses)
 
@@ -428,6 +476,9 @@ class Almanet:
         self,
         reason: str | None = None,
     ) -> None:
+        """
+        Leave the session from message broker.
+        """
         if not self.joined:
             raise RuntimeError(f"session {self.id} not joined")
 

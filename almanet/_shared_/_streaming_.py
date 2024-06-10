@@ -9,7 +9,7 @@ __all__ = [
 
 async def merge_streams(*streams):
     """
-    This is an asynchronous function that merges multiple asynchronous streams into a single stream.
+    Merges multiple asynchronous streams into a single stream.
     It takes in any number of streams as arguments and continuously yields values from each stream until all streams are exhausted.
     """
     pending_tasks = [asyncio.create_task(anext(i)) for i in streams]
@@ -39,7 +39,7 @@ def make_closable(
     on_close: typing.Callable[[], typing.Awaitable[None]] | None = None,
 ):
     """
-    This is a function that makes an asynchronous stream closable.
+    Makes an asynchronous stream closable.
 
     Args:
     - stream: is an asynchronous stream that you want to make closable.
