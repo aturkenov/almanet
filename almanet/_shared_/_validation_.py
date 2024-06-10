@@ -13,6 +13,15 @@ def validate_execution(
     validate_payload: bool = True,
     validate_return: bool = True,
 ):
+    """
+    Takes a function as input and returns a decorator.
+    The decorator validates the input payload and output return of the function based on their annotations.
+
+    Args:
+    - function: the function to decorate with validator
+    - validate_payload: if True, the payload of the function is validated.
+    - validate_return: if True, the return of the function is validated.
+    """
     payload_annotation, return_annotation = _schema_.extract_annotations(function)
 
     if not validate_payload or payload_annotation is ...:
@@ -21,7 +30,6 @@ def validate_execution(
         payload_validator = _decoding_.serialize(payload_annotation)
 
     if not validate_return or return_annotation is ...:
-        # raise RuntimeError(f'set {procedure} returning annotation')
         return_validator = lambda v: v
     else:
         return_validator = _decoding_.serialize(return_annotation)
