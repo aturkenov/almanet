@@ -1,4 +1,5 @@
 import asyncio
+import typing
 
 __all__ = [
     "merge_streams",
@@ -6,9 +7,11 @@ __all__ = [
 ]
 
 
-async def merge_streams(
-    *streams
-):
+async def merge_streams(*streams):
+    """
+    This is an asynchronous function that merges multiple asynchronous streams into a single stream.
+    It takes in any number of streams as arguments and continuously yields values from each stream until all streams are exhausted.
+    """
     pending_tasks = [asyncio.create_task(anext(i)) for i in streams]
     active = True
     while active:
@@ -33,15 +36,20 @@ async def merge_streams(
 
 def make_closable(
     stream,
-    on_close = None,
+    on_close: typing.Callable[[], typing.Awaitable[None]] | None = None,
 ):
-    run_callback = asyncio.iscoroutinefunction(on_close)
+    """
+    This is a function that makes an asynchronous stream closable.
 
+    Args:
+    - stream: is an asynchronous stream that you want to make closable.
+    - on_close: is a callable that takes no arguments and returns an awaitable that completes when the stream is closed.
+    """
     close_event = asyncio.Event()
 
     async def on_close_stream():
         await close_event.wait()
-        if run_callback:
+        if asyncio.iscoroutinefunction(on_close):
             await on_close()
         yield StopAsyncIteration()
 
