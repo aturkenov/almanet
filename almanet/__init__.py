@@ -19,6 +19,9 @@ def new_session(
     client_klass: type[client_iface] = clients.DEFAULT_CLIENT,
     **kwargs: typing.Unpack[Almanet._kwargs],
 ) -> Almanet:
+    """
+    Returns a new instance of Almanet session.
+    """
     return Almanet(
         *addresses,
         client=client_klass(),
@@ -31,6 +34,9 @@ def new_microservice(
     session: Almanet | None = None,
     **kwargs: typing.Unpack[microservice._kwargs],
 ) -> microservice:
+    """
+    Returns a new instance of microservice.
+    """
     if session is None:
         session = new_session(*addresses)
     return microservice(session, **kwargs)

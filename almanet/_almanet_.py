@@ -182,6 +182,8 @@ class Almanet:
         client: client_iface,
         **kwargs: typing.Unpack[_kwargs],
     ) -> None:
+        if not all(isinstance(i, str) for i in addresses):
+            raise ValueError("addresses must be a iterable of strings")
         self.addresses = addresses
         self._client = client
         self.__pending_replies: typing.MutableMapping[str, asyncio.Future[reply_event_model]] = {}
