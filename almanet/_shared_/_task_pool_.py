@@ -22,6 +22,13 @@ class task_pool:
         *,
         daemon: bool = False,
     ) -> asyncio.Task:
+        """
+        Schedules a coroutine for execution in the event loop.
+
+        Args:
+        - coroutine: the coroutine to be scheduled as an asyncio task.
+        - daemon: if True, the task is marked as a daemon task.
+        """
         task = asyncio.create_task(coroutine)
         task.add_done_callback(
             lambda _: self._tasks.discard(task)
@@ -32,6 +39,10 @@ class task_pool:
         return task
 
     async def complete(self) -> None:
+        """
+        Awaits the completion of all non-daemon tasks in the pool.
+        This method will block until all non-daemon tasks have finished executing.
+        """
         pending_tasks = self._tasks - self._daemons
         if len(pending_tasks) > 0:
             await asyncio.wait(pending_tasks)
