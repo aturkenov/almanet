@@ -7,6 +7,12 @@ __all__ = [
 ]
 
 
+class close_stream(StopAsyncIteration):
+    """
+    Raise when you need to close an asynchronous stream.
+    """
+
+
 async def merge_streams(*streams):
     """
     Merges multiple asynchronous streams into a single stream.
@@ -18,7 +24,7 @@ async def merge_streams(*streams):
         done_tasks, _ = await asyncio.wait(pending_tasks, return_when=asyncio.FIRST_COMPLETED)
         for dt in done_tasks:
             result = dt.result()
-            if isinstance(result, StopAsyncIteration):
+            if isinstance(result, close_stream):
                 active = False
                 continue
             yield result
@@ -51,7 +57,7 @@ def make_closable(
         await close_event.wait()
         if asyncio.iscoroutinefunction(on_close):
             await on_close()
-        yield StopAsyncIteration()
+        yield close_stream()
 
     new_stream = merge_streams(stream, on_close_stream())
     return new_stream, close_event.set
