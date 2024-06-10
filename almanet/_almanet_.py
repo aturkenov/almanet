@@ -18,7 +18,7 @@ __all__ = [
 
 
 logger = logging.getLogger("almanet")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 
 @_shared_.dataclass(slots=True)
