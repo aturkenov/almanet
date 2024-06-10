@@ -1,13 +1,11 @@
 import almanet
 
-my_service = almanet.new_service("localhost:4150", prefix="net.example")
+example_service = almanet.new_microservice("localhost:4150", prefix="net.example")
 
 class access_denied(almanet.rpc_error):
-    """
-    Custom RPC exception.
-    """
+    """Custom RPC exception"""
 
-@my_service.procedure()
+@example_service.procedure
 async def greeting(
     payload: str,  # is a data that was passed during invocation
     session: almanet.Almanet,
@@ -23,4 +21,4 @@ async def greeting(
     return f"Hello, {payload}!"
 
 if __name__ == "__main__":
-    my_service.serve()
+    example_service.serve()

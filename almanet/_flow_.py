@@ -3,7 +3,7 @@ import logging
 import re
 import typing
 
-from . import _service_
+from . import _microservice_
 from . import _shared_
 
 if typing.TYPE_CHECKING:
@@ -66,7 +66,7 @@ class _state:
 
     entity: str
     label: str
-    service: _service_.service
+    service: _microservice_.microservice
     description: str | None = None
     transitions: typing.List[transition] = ...
 

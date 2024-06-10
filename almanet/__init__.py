@@ -2,15 +2,15 @@ import typing
 from ._almanet_ import *
 from . import _clients_ as clients
 from ._flow_ import *
-from ._service_ import *
+from ._microservice_ import *
 
 __all__ = [
     *_almanet_.__all__,
     "clients",
     'new_session',
     *_flow_.__all__,
-    *_service_.__all__,
-    'new_service',
+    *_microservice_.__all__,
+    'new_microservice',
 ]
 
 
@@ -26,11 +26,11 @@ def new_session(
     )
 
 
-def new_service(
+def new_microservice(
     *addresses: str,
     session: Almanet | None = None,
-    **kwargs: typing.Unpack[service._kwargs],
-) -> service:
+    **kwargs: typing.Unpack[microservice._kwargs],
+) -> microservice:
     if session is None:
         session = new_session(*addresses)
-    return service(session, **kwargs)
+    return microservice(session, **kwargs)
