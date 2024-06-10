@@ -6,5 +6,8 @@ __all__ = [
 
 
 def new_id() -> str:
+    """
+    Returns a new distributed unique id.
+    """
     v = uuid4()
     return v.hex
