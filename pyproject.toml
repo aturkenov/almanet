@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "almanet"
-version = "0.2.0"
+version = "0.2.1"
 description = "Web Messaging Protocol"
 authors = ["aturkenov"]
 readme = "README.md"
@@ -15,8 +15,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3.12",
-    "Operating System :: OS Independent",
-    "Framework :: Almanet"
+    "Operating System :: OS Independent"
 ]
 packages = [
     { include = "almanet" },

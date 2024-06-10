@@ -5,11 +5,9 @@
 
 __pycache__/
 
-nsqd.dat
-
-# Logs
 *.log
-
+nsqd.dat
+dist/
 node_modules/
 build/
 .vite/

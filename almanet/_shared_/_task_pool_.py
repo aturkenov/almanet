@@ -32,4 +32,6 @@ class task_pool:
         return task
 
     async def complete(self) -> None:
-        await asyncio.wait(self._tasks - self._daemons)
+        pending_tasks = self._tasks - self._daemons
+        if len(pending_tasks) > 0:
+            await asyncio.wait(pending_tasks)
