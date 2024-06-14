@@ -38,7 +38,7 @@ import almanet
 #### Define your instance of microservice
 ```python
 example_service = almanet.new_service(
-    'localhost:4150',
+    "localhost:4150",
     prefix="net.example"
 )
 ```
@@ -97,7 +97,7 @@ Run your module using the python command
 
 #### Create a new session
 ```python
-session = almanet.new_session('localhost:4150')
+session = almanet.new_session("localhost:4150")
 ```
 
 _Arguments_:
