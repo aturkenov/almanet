@@ -1,10 +1,10 @@
 import almanet
 
-example_service = almanet.new_microservice("localhost:4150")
+example_service = almanet.new_microservice("localhost:4150", prefix="net.order")
 
-state_any = almanet.observable_state(example_service, "order", "any")
-state_initial = almanet.observable_state(example_service, "order", "initial")
-state_complete = almanet.observable_state(example_service, "order", "complete")
+state_any = almanet.observable_state(example_service, "any")
+state_initial = almanet.observable_state(example_service, "initial")
+state_complete = almanet.observable_state(example_service, "complete")
 
 @state_initial.transition_from(state_any)
 async def create(

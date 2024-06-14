@@ -62,14 +62,9 @@ _state_label_re = re.compile("[A-Za-z_]+")
 class _state:
 
     service: _microservice_.microservice
-    entity: str
     label: str
     description: str | None = None
     _transitions: typing.List[transition] = ...
-
-    @property
-    def subtopic(self) -> str:
-        return f'{self.entity}.{self.label}'
 
     def __post_init__(self):
         if not (isinstance(self.label, str) and len(self.label) > 0 and _state_label_re.match(self.label)):
@@ -168,13 +163,13 @@ class observable_state(_state):
                 _logger.error(f"during execution of {observer.label}: {repr(e)}")
 
         if len(self.observers) > 0:
-            raise flow_execution_error(self.subtopic)
+            raise flow_execution_error(self.label)
 
     def __post_init__(self):
         super(observable_state, self).__post_init__()
         self.service.add_procedure(
             self.next,
-            label=self.subtopic,
+            label=self.label,
             include_to_api=False,
             validate=False,
         )
@@ -185,7 +180,7 @@ class observable_state(_state):
         previous_result,
     ) -> asyncio.Task:
         return session.call(
-            self.service._make_topic(self.subtopic),
+            self.service._make_topic(self.label),
             previous_result,
         )
 
