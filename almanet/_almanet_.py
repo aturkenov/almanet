@@ -142,9 +142,9 @@ class registration_model:
         try:
             logger.debug("trying to execute procedure", extra=__log_extra)
             if self.is_async:
-                reply_payload = await self.procedure(invocation.payload, session=self.session)
+                reply_payload = await self.procedure(self.session, invocation.payload)
             else:
-                reply_payload = await asyncio.to_thread(self.procedure, invocation.payload, session=self.session)
+                reply_payload = await asyncio.to_thread(self.procedure, self.session, invocation.payload)
             return reply_event_model(call_id=invocation.id, is_error=False, payload=reply_payload)
         except Exception as e:
             if isinstance(e, rpc_error):

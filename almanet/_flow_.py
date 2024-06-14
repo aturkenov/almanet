@@ -22,16 +22,19 @@ _logger = logging.getLogger(__name__)
 @_shared_.dataclass(slots=True)
 class transition:
     label: str
-    source: "observable_state"
+    sources: list["observable_state"]
     target: "observable_state"
     procedure: typing.Callable
     description: str | None = None
     priority: int = -1
-    is_async: bool = False
 
-    def __post_init__(self):
-        if asyncio.iscoroutinefunction(self.procedure):
-            self.is_async = True
+    @property
+    def is_observer(self) -> bool:
+        return self.priority > -1
+
+    @property
+    def is_async(self) -> bool:
+        return asyncio.iscoroutinefunction(self.procedure)
 
     def __call__(
         self,
@@ -40,22 +43,16 @@ class transition:
         **kwargs,
     ):
         if self.is_async:
-            coroutine = self.procedure(*args, **kwargs, transition=self)
+            coroutine = self.procedure(session, *args, **kwargs, transition=self)
             task = asyncio.create_task(coroutine)
             task.add_done_callback(
                 lambda task: self.target.notify(session, task.result())
             )
             return task
 
-        result = self.procedure(*args, **kwargs, transition=self)
+        result = self.procedure(session, *args, **kwargs, transition=self)
         self.target.notify(session, result)
         return result
-
-    def __str__(self) -> str:
-        return f"{self.label}: {self.source.label} > {self.target.label}"
-
-    def __hash__(self) -> int:
-        return hash(self.__str__())
 
 
 _state_label_re = re.compile("[A-Za-z_]+")
@@ -64,94 +61,91 @@ _state_label_re = re.compile("[A-Za-z_]+")
 @_shared_.dataclass(slots=True)
 class _state:
 
+    service: _microservice_.microservice
     entity: str
     label: str
-    service: _microservice_.microservice
     description: str | None = None
-    transitions: typing.List[transition] = ...
+    _transitions: typing.List[transition] = ...
+
+    @property
+    def subtopic(self) -> str:
+        return f'{self.entity}.{self.label}'
 
     def __post_init__(self):
         if not (isinstance(self.label, str) and len(self.label) > 0 and _state_label_re.match(self.label)):
             raise ValueError("`label` must contain uppercase words separated by underscore")
-        self.transitions = []
+        self._transitions = []
 
     def _add_transition(
         self,
-        label: str | None,
-        description: str | None,
-        target: "observable_state",
+        sources: typing.Iterable["observable_state"],
         procedure: typing.Callable,
+        label: str | None = None,
+        description: str | None = None,
+        transition_class = transition,
         **extra,
-    ) -> transition:
+    ):
         if not callable(procedure):
-            raise ValueError("decorated function must be callable")
+            raise ValueError('decorated function must be callable')
 
         if label is None:
-            label = f"{procedure.__module__}.{procedure.__name__}"
+            label = procedure.__name__
 
         if description is None:
             description = procedure.__doc__
 
-        if not isinstance(target, observable_state):
+        if not all(isinstance(i, observable_state) for i in sources):
             raise ValueError(f"{label}: `target` must be `observable_state` instance")
 
-        instance = transition(
+        instance = transition_class(
             label=label,
             description=description,
-            source=self, # type: ignore
-            target=target,
+            sources=list(sources),
+            target=self,  # type: ignore
             procedure=procedure,
             **extra,
         )
-        self.transitions.append(instance)
+
+        for i in sources:
+            i._transitions.append(instance)
+            i._transitions = sorted(i._transitions, key=lambda o: -o.priority)
+
         return instance
 
-    def transition(
+    def transition_from(
         self,
-        target: "observable_state",
-        label: str | None = None,
-        description: str | None = None,
+        *sources: "observable_state",
         **extra,
     ):
         def wrap(function):
-            return self._add_transition(
-                label=label,
-                description=description,
-                target=target,
-                procedure=function,
-                **extra,
-            )
+            return self._add_transition(sources, procedure=function, **extra)
         return wrap
 
 
-LOWEST_PRIORITY = 100
-LOW_PRIORITY = 75
-MEDIUM_PRIORITY = 50
-HIGH_PRIORITY = 25
-HIGHEST_PRIORITY = 0
+class priorities:
+    unset = -1
+    lowest = 0
+    low = 25
+    medium = 50
+    high = 75
+    highest = 100
 
-DEFAULT_PRIORITY = MEDIUM_PRIORITY
+
+class flow_execution_error(Exception):
+    ...
 
 
 @_shared_.dataclass(slots=True)
 class observable_state(_state):
 
-    _observers: typing.List[transition] = ...
-
     @property
-    def route(self) -> str:
-        return f'{self.entity}.{self.label}.next'
-
-    @property
-    def full_route(self) -> str:
-        if isinstance(self.service.pre, str):
-            return f'{self.service.pre}.{self.route}'
-        return self.route
+    def observers(self) -> list[transition]:
+        return [i for i in self._transitions if i.is_observer]
 
     async def next(
         self,
-        payload: typing.Any,
         session: "_almanet_.Almanet",
+        payload: typing.Any,
         **kwargs,
     ) -> typing.Any:
         _logger.debug(f"{self.label} begin")
@@ -161,7 +155,7 @@ class observable_state(_state):
         if isinstance(payload, typing.Iterable):
             payload = [payload]
 
-        for observer in self._observers:
+        for observer in self.observers:
             _logger.debug(f"trying to call {observer.label} observer")
             try:
                 if observer.is_async:
@@ -173,57 +167,49 @@ class observable_state(_state):
             except Exception as e:
                 _logger.error(f"during execution of {observer.label}: {repr(e)}")
 
+        if len(self.observers) > 0:
+            raise flow_execution_error(self.subtopic)
+
     def __post_init__(self):
         super(observable_state, self).__post_init__()
-        self._observers = []
-        self.service.add_procedure(self.next, label=self.route, include_to_api=False, validate=False)
+        self.service.add_procedure(
+            self.next,
+            label=self.subtopic,
+            include_to_api=False,
+            validate=False,
+        )
 
     def notify(
         self,
         session: "_almanet_.Almanet",
-        previous_result: typing.Any,
-    ):
+        previous_result,
+    ) -> asyncio.Task:
         return session.call(
-            self.full_route,
+            self.service._make_topic(self.subtopic),
             previous_result,
         )
 
     def _add_observer(
         self,
-        priority: int,
+        priority: int = priorities.medium,
         **kwargs,
-    ) -> transition:
+    ):
         if not (isinstance(priority, int) and priority > -1):
             raise ValueError("`priority` must be `integer` and greater than -1")
 
-        instance = self._add_transition(**kwargs, priority=priority)
-
-        existing_priorities = {i.priority for i in self._observers}
+        existing_priorities = {i.priority for i in self.observers}
         if priority in existing_priorities:
-            raise ValueError(f"invalid observer `{instance.label}`: priority {priority} already exists")
+            raise ValueError(f"invalid observer `{self.label}` (priority {priority} already exists)")
 
-        self._observers.append(instance)
-        self._observers = sorted(self._observers, key=lambda x: -x.priority)
+        return self._add_transition(**kwargs, priority=priority)
 
-        return instance
-
-    def observer(
+    def observe(
         self,
-        target: "observable_state",
-        label: str | None = None,
-        description: str | None = None,
-        priority: int = DEFAULT_PRIORITY,
+        *sources: "observable_state",
         **extra,
     ):
         def wrap(function):
-            return self._add_observer(
-                label=label,
-                description=description,
-                target=target,
-                procedure=function,
-                priority=priority,
-                **extra,
-            )
+            return self._add_observer(sources=sources, procedure=function, **extra)
         return wrap
 
 

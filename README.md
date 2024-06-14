@@ -59,8 +59,8 @@ This custom exception can be raised within procedures to signal specific error c
 ```python
 @example_service.procedure
 async def greeting(
-    payload: str,
     session: almanet.Almanet,
+    payload: str,
 ) -> str:
     """Procedure that returns greeting message"""
     if payload == "guest":

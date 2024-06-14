@@ -1,23 +1,23 @@
 import almanet
 
-my_service = almanet.new_service("localhost:4150")
+example_service = almanet.new_microservice("localhost:4150")
 
-state_any = almanet.observable_state("user", "any", my_service)
-state_initial = almanet.observable_state("user", "initial", my_service)
-state_complete = almanet.observable_state("user", "complete", my_service)
+state_any = almanet.observable_state(example_service, "order", "any")
+state_initial = almanet.observable_state(example_service, "order", "initial")
+state_complete = almanet.observable_state(example_service, "order", "complete")
 
-
-@state_any.transition(target=state_initial)
+@state_initial.transition_from(state_any)
 async def create(
+    session: almanet.Almanet,
     name: str,
     **kwargs,
 ) -> str:
     print('create: ', name)
-    return f"Hello, {name}!"
+    return f"Order {name} created!"
 
-
-@state_initial.observer(target=state_complete)
+@state_complete.observe(state_initial)
 async def _complete(
+    session: almanet.Almanet,
     previous_result: str,
     **kwargs,
 ) -> None:
@@ -25,4 +25,4 @@ async def _complete(
 
 
 if __name__ == "__main__":
-    my_service.serve()
+    example_service.serve()

@@ -82,6 +82,12 @@ class microservice:
 
         self._routes.add(f'{topic}/{channel}')
 
+    def _make_topic(
+        self,
+        subtopic: str,
+    ) -> str:
+        return f'{self.pre}.{subtopic}' if isinstance(self.pre, str) else subtopic
+
     class _register_procedure_kwargs(typing.TypedDict):
         label: typing.NotRequired[str]
         channel: typing.NotRequired[str]
@@ -98,10 +104,8 @@ class microservice:
         procedure: typing.Callable,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
     ):
-        topic = kwargs.get('label', procedure.__name__)
-
-        if isinstance(self.pre, str):
-            topic = f'{self.pre}.{topic}'
+        label = kwargs.get('label', procedure.__name__)
+        topic = self._make_topic(label)
 
         if kwargs.get('validate', True):
             procedure = _shared_.validate_execution(procedure)

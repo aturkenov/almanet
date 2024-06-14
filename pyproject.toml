@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "almanet"
-version = "0.2.4"
+version = "0.3.0"
 description = "Web Messaging Protocol"
 authors = ["aturkenov"]
 readme = "README.md"
@@ -39,7 +39,12 @@ build-backend = "poetry.core.masonry.api"
 line-length = 100
 
 [tool.ruff.format]
-quote-style = "single"
+quote-style = "double"
 
 [tool.ruff.lint]
 ignore = ["E731"]
+
+[tool.pyright]
+include = ["almanet"]
+typeCheckingMode = "basic"
+reportAssignmentType = "warning"
