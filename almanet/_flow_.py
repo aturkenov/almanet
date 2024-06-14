@@ -22,7 +22,7 @@ _logger = logging.getLogger(__name__)
 @_shared_.dataclass(slots=True)
 class transition:
     label: str
-    sources: list["observable_state"]
+    sources: set["observable_state"]
     target: "observable_state"
     procedure: typing.Callable
     description: str | None = None
@@ -95,7 +95,7 @@ class _state:
         instance = transition_class(
             label=label,
             description=description,
-            sources=list(sources),
+            sources=set(sources),
             target=self,  # type: ignore
             procedure=procedure,
             **extra,
@@ -206,6 +206,9 @@ class observable_state(_state):
         def wrap(function):
             return self._add_observer(sources=sources, procedure=function, **extra)
         return wrap
+
+    def __hash__(self) -> int:
+        return hash(self.label)
 
 
 class next_observer(Exception):
