@@ -2,8 +2,8 @@ import typing
 
 import ansq
 
-from almanet import _almanet_
-from almanet import _shared_
+from almanet import _almanet
+from almanet import _shared
 
 if typing.TYPE_CHECKING:
     from ansq.tcp.types import NSQMessage
@@ -35,9 +35,9 @@ class ANSQClient:
     async def _convert_ansq_message(
         self,
         ansq_messages_stream: typing.AsyncIterable['NSQMessage'],
-    ) -> typing.AsyncIterable[_almanet_.qmessage_model[bytes]]:
+    ) -> typing.AsyncIterable[_almanet.qmessage_model[bytes]]:
         async for ansq_message in ansq_messages_stream:
-            almanet_message = _almanet_.qmessage_model(
+            almanet_message = _almanet.qmessage_model(
                 id=ansq_message.id,
                 timestamp=ansq_message.timestamp,
                 body=ansq_message.body,
@@ -51,7 +51,7 @@ class ANSQClient:
         self,
         topic: str,
         channel: str,
-    ) -> _almanet_.returns_consumer[bytes]:
+    ) -> _almanet.returns_consumer[bytes]:
         reader = await ansq.create_reader(
             nsqd_tcp_addresses=self.addresses,
             topic=topic,
@@ -59,6 +59,6 @@ class ANSQClient:
         )
         messages_stream = reader.messages()
         # ansq does not close stream automatically
-        messages_stream, close_stream = _shared_.make_closable(messages_stream, reader.close)
+        messages_stream, close_stream = _shared.make_closable(messages_stream, reader.close)
         messages_stream = self._convert_ansq_message(messages_stream)
         return messages_stream, close_stream

@@ -3,11 +3,11 @@ import logging
 import re
 import typing
 
-from . import _microservice_
-from . import _shared_
+from . import _microservice
+from . import _shared
 
 if typing.TYPE_CHECKING:
-    from . import _almanet_
+    from . import _almanet
 
 __all__ = [
     "observable_state",
@@ -19,7 +19,7 @@ __all__ = [
 _logger = logging.getLogger(__name__)
 
 
-@_shared_.dataclass(slots=True)
+@_shared.dataclass(slots=True)
 class transition:
     label: str
     sources: set["observable_state"]
@@ -38,7 +38,7 @@ class transition:
 
     def __call__(
         self,
-        session: "_almanet_.Almanet",
+        session: "_almanet.Almanet",
         *args,
         **kwargs,
     ):
@@ -58,10 +58,10 @@ class transition:
 _state_label_re = re.compile("[A-Za-z_]+")
 
 
-@_shared_.dataclass(slots=True)
+@_shared.dataclass(slots=True)
 class _state:
 
-    service: _microservice_.microservice
+    service: _microservice.microservice
     label: str
     description: str | None = None
     _transitions: typing.List[transition] = ...
@@ -130,7 +130,7 @@ class flow_execution_error(Exception):
     ...
 
 
-@_shared_.dataclass(slots=True)
+@_shared.dataclass(slots=True)
 class observable_state(_state):
 
     @property
@@ -139,7 +139,7 @@ class observable_state(_state):
 
     async def next(
         self,
-        session: "_almanet_.Almanet",
+        session: "_almanet.Almanet",
         payload: typing.Any,
         **kwargs,
     ) -> typing.Any:
@@ -176,11 +176,11 @@ class observable_state(_state):
 
     def notify(
         self,
-        session: "_almanet_.Almanet",
+        session: "_almanet.Almanet",
         previous_result,
     ) -> asyncio.Task:
         return session.call(
-            self.service._make_topic(self.label),
+            self.service._make_uri(self.label),
             previous_result,
         )
 

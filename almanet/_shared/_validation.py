@@ -1,8 +1,8 @@
 import functools
 import inspect
 
-from . import _decoding_
-from . import _schema_
+from . import _decoding
+from . import _schema
 
 __all__ = ["validate_execution"]
 
@@ -22,17 +22,17 @@ def validate_execution(
     - validate_payload: if True, the payload of the function is validated.
     - validate_return: if True, the return of the function is validated.
     """
-    payload_annotation, return_annotation = _schema_.extract_annotations(function)
+    payload_annotation, return_annotation = _schema.extract_annotations(function)
 
     if not validate_payload or payload_annotation is ...:
         payload_validator = lambda v: v
     else:
-        payload_validator = _decoding_.serialize(payload_annotation)
+        payload_validator = _decoding.serialize(payload_annotation)
 
     if not validate_return or return_annotation is ...:
         return_validator = lambda v: v
     else:
-        return_validator = _decoding_.serialize(return_annotation)
+        return_validator = _decoding.serialize(return_annotation)
 
     @functools.wraps(function)
     async def async_decorator(payload, *args, **kwargs):

@@ -1,8 +1,8 @@
 import asyncio
 import typing
 
-from . import _almanet_
-from . import _shared_
+from . import _almanet
+from . import _shared
 
 __all__ = [
     "microservice",
@@ -24,7 +24,7 @@ class microservice:
 
     def __init__(
         self,
-        session: _almanet_.Almanet,
+        session: _almanet.Almanet,
         **kwargs: typing.Unpack[_kwargs],
     ):
         self._post_join_callbacks = []
@@ -82,7 +82,7 @@ class microservice:
 
         self._routes.add(f'{topic}/{channel}')
 
-    def _make_topic(
+    def _make_uri(
         self,
         subtopic: str,
     ) -> str:
@@ -105,15 +105,15 @@ class microservice:
         **kwargs: typing.Unpack[_register_procedure_kwargs],
     ):
         label = kwargs.get('label', procedure.__name__)
-        topic = self._make_topic(label)
+        topic = self._make_uri(label)
 
         if kwargs.get('validate', True):
-            procedure = _shared_.validate_execution(procedure)
+            procedure = _shared.validate_execution(procedure)
 
         registration = await self.session.register(topic, procedure, channel=kwargs.get('channel'))
 
         if kwargs.get('include_to_api', True):
-            procedure_schema = _shared_.describe_function(
+            procedure_schema = _shared.describe_function(
                 procedure,
                 kwargs.get('description'),
                 kwargs.get('payload_model', ...),

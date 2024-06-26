@@ -1,15 +1,15 @@
 import typing
-from ._almanet_ import *
-from . import _clients_ as clients
-from ._flow_ import *
-from ._microservice_ import *
+from ._almanet import *
+from . import _clients as clients
+from ._flow import *
+from ._microservice import *
 
 __all__ = [
-    *_almanet_.__all__,
+    *_almanet.__all__,
     "clients",
     'new_session',
-    *_flow_.__all__,
-    *_microservice_.__all__,
+    *_flow.__all__,
+    *_microservice.__all__,
     'new_microservice',
 ]
 

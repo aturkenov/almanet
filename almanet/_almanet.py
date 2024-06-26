@@ -5,7 +5,7 @@ import typing
 
 import pydantic_core
 
-from . import _shared_
+from . import _shared
 
 __all__ = [
     "Almanet",
@@ -21,7 +21,7 @@ logger = logging.getLogger("almanet")
 logger.setLevel(logging.INFO)
 
 
-@_shared_.dataclass(slots=True)
+@_shared.dataclass(slots=True)
 class qmessage_model[T: typing.Any]:
     """
     Represents a message in the queue.
@@ -67,7 +67,7 @@ class client_iface(typing.Protocol):
         raise NotImplementedError()
 
 
-@_shared_.dataclass(slots=True)
+@_shared.dataclass(slots=True)
 class invoke_event_model[T: typing.Any]:
     """
     Represents an invocation event.
@@ -84,7 +84,7 @@ class invoke_event_model[T: typing.Any]:
         return False
 
 
-@_shared_.dataclass(slots=True)
+@_shared.dataclass(slots=True)
 class reply_event_model[T: typing.Any]:
     """
     Represents a reply event.
@@ -115,7 +115,7 @@ class rpc_error(Exception):
         return f"{self.name}{self.args}"
 
 
-@_shared_.dataclass(slots=True)
+@_shared.dataclass(slots=True)
 class registration_model:
     """
     Represents a registered procedure to call.
@@ -188,9 +188,9 @@ class Almanet:
         self._client = client
         self.__pending_replies: typing.MutableMapping[str, asyncio.Future[reply_event_model]] = {}
         self.__leave_callbacks: list[typing.Callable] = list()
-        self.id = kwargs.get("id") or _shared_.new_id()
+        self.id = kwargs.get("id") or _shared.new_id()
         self.joined = False
-        self.task_pool = _shared_.task_pool()
+        self.task_pool = _shared.task_pool()
 
     type __produce_args = tuple[str, typing.Any]
 
@@ -200,7 +200,7 @@ class Almanet:
         payload: typing.Any,
     ) -> None:
         try:
-            message_body = _shared_.dump(payload)
+            message_body = _shared.dump(payload)
         except Exception as e:
             logger.error(f"during encode payload: {repr(e)}")
             raise e
@@ -228,7 +228,7 @@ class Almanet:
         messages_stream: typing.AsyncIterable[qmessage_model[bytes]],
         payload_model: type[T] | typing.Any = ...,
     ) -> typing.AsyncIterable[qmessage_model[T]]:
-        serializer = _shared_.serialize_json(payload_model)
+        serializer = _shared.serialize_json(payload_model)
 
         async for message in messages_stream:
             try:
@@ -300,7 +300,7 @@ class Almanet:
         timeout: int = 60,
     ) -> reply_event_model:
         invocation = invoke_event_model(
-            id=_shared_.new_id(),
+            id=_shared.new_id(),
             caller_id=self.id,
             payload=payload,
             reply_topic=f"_rpc_._reply_.{self.id}",
@@ -357,7 +357,7 @@ class Almanet:
         timeout: int = 60,
     ) -> list[reply_event_model]:
         invocation = invoke_event_model(
-            id=_shared_.new_id(),
+            id=_shared.new_id(),
             caller_id=self.id,
             payload=payload,
             reply_topic=f"_rpc_._replies_.{self.id}",
