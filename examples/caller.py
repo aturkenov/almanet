@@ -2,7 +2,7 @@ import asyncio
 
 import almanet
 
-from examples import flow
+from examples import microservice
 
 async def main():
     # create new session
@@ -13,12 +13,15 @@ async def main():
         print(f"joined session.id={session.id}")
 
         # calling the procedure `net.examples.greeting` with "Aidar" argument
-        result = await session.call("net.example.greeting", "Aidar")
+        result = await session.call(microservice.greeting, "Aidar")
+        # or calling the same procedure by URI (Uniform Resource Identifier)
+        # result = await session.call("net.example.greeting", "Aidar")
+
         # invocation result in `.payload` attribute.
         print("result", result.payload)
 
         # catching rpc exceptions with `try` and `except almanet.rpc_error` statement
-        # validation error
+        # validation error``
         try:
             await session.call("net.example.greeting", 123)
         except almanet.rpc_error as e:
@@ -28,8 +31,5 @@ async def main():
             await session.call("net.example.greeting", "guest")
         except almanet.rpc_error as e:
             print("during call net.example.greeting('guest'):", e)
-
-        # transition execution
-        await flow.create(session, "Aidar")
 
 asyncio.run(main())

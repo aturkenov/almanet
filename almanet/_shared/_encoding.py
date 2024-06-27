@@ -15,5 +15,5 @@ def dump(v: typing.Any) -> bytes:
         return v.encode()
 
     codec = pydantic.RootModel(v)
-    str_json = codec.model_dump_json()
-    return str_json.encode()
+    json_as_string = codec.model_dump_json()
+    return json_as_string.encode()

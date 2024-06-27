@@ -17,6 +17,7 @@ __all__ = [
 
 
 _logger = logging.getLogger(__name__)
+_logger.setLevel(logging.INFO)
 
 
 @_shared.dataclass(slots=True)
@@ -27,31 +28,48 @@ class transition:
     procedure: typing.Callable
     description: str | None = None
     priority: int = -1
+    registration: typing.Optional["_almanet.registration_model"] = None
+    _is_async = False
+
+    @property
+    def __name__(self) -> str:
+        return self.label
+
+    @property
+    def __doc__(self) -> str | None:
+        return self.description
+
+    @property
+    def uri(self) -> str | None:
+        if self.registration is None:
+            return None
+        return self.registration.uri
 
     @property
     def is_observer(self) -> bool:
         return self.priority > -1
 
-    @property
-    def is_async(self) -> bool:
-        return asyncio.iscoroutinefunction(self.procedure)
-
     def __call__(
         self,
-        session: "_almanet.Almanet",
         *args,
         **kwargs,
     ):
-        if self.is_async:
-            coroutine = self.procedure(session, *args, **kwargs, transition=self)
-            task = asyncio.create_task(coroutine)
-            task.add_done_callback(
-                lambda task: self.target.notify(session, task.result())
-            )
-            return task
+        result = self.procedure(*args, **kwargs, transition=self)
+        self.target.notify(result)
+        return result
 
-        result = self.procedure(session, *args, **kwargs, transition=self)
-        self.target.notify(session, result)
+
+@_shared.dataclass(slots=True)
+class async_transition(transition):
+    _is_async = True
+
+    async def __call__(
+        self,
+        *args,
+        **kwargs,
+    ):
+        result = await self.procedure(*args, **kwargs, transition=self)
+        self.target.notify(result)
         return result
 
 
@@ -77,11 +95,12 @@ class _state:
         procedure: typing.Callable,
         label: str | None = None,
         description: str | None = None,
-        transition_class = transition,
         **extra,
     ):
         if not callable(procedure):
-            raise ValueError('decorated function must be callable')
+            raise ValueError("decorated function must be callable")
+
+        transition_class = async_transition if asyncio.iscoroutinefunction(procedure) else transition
 
         if label is None:
             label = procedure.__name__
@@ -100,6 +119,12 @@ class _state:
             procedure=procedure,
             **extra,
         )
+
+        if not instance.is_observer:
+            instance.registration = self.service.register_procedure(
+                instance.__call__,
+                label=label,
+            )
 
         for i in sources:
             i._transitions.append(instance)
@@ -139,24 +164,23 @@ class observable_state(_state):
 
     async def next(
         self,
-        session: "_almanet.Almanet",
-        payload: typing.Any,
+        previous_result: typing.Any,
         **kwargs,
     ) -> typing.Any:
         _logger.debug(f"{self.label} begin")
 
-        if payload is None:
-            payload = []
-        if isinstance(payload, typing.Iterable):
-            payload = [payload]
+        if previous_result is None:
+            previous_result = []
+        if not isinstance(previous_result, list):
+            previous_result = [previous_result]
 
         for observer in self.observers:
-            _logger.debug(f"trying to call {observer.label} observer")
+            _logger.debug(f"trying to call {observer.label} observer {previous_result}")
             try:
-                if observer.is_async:
-                    result = await observer(session, *payload, **kwargs)
+                if observer._is_async:
+                    result = await observer(*previous_result, **kwargs)
                 else:
-                    result = await asyncio.to_thread(observer, session, *payload, **kwargs)
+                    result = await asyncio.to_thread(observer, *previous_result, **kwargs)
                 _logger.debug(f"{observer.label} observer end")
                 return result
             except Exception as e:
@@ -167,7 +191,7 @@ class observable_state(_state):
 
     def __post_init__(self):
         super(observable_state, self).__post_init__()
-        self.service.add_procedure(
+        self.service.register_procedure(
             self.next,
             label=self.label,
             include_to_api=False,
@@ -176,10 +200,9 @@ class observable_state(_state):
 
     def notify(
         self,
-        session: "_almanet.Almanet",
         previous_result,
     ) -> asyncio.Task:
-        return session.call(
+        return self.service.session.call(
             self.service._make_uri(self.label),
             previous_result,
         )

@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 import logging
 import typing
 
@@ -121,18 +120,22 @@ class registration_model:
     Represents a registered procedure to call.
     """
 
-    topic: str
+    uri: str
     channel: str
     procedure: typing.Callable
     session: "Almanet"
-    is_async: bool = False
 
-    def __post_init__(self):
-        if self.channel is None:
-            self.channel = "RPC"
+    @property
+    def __name__(self):
+        return self.uri
 
-        if inspect.iscoroutinefunction(self.procedure):
-            self.is_async = True
+    @property
+    def __doc__(self):
+        return self.procedure.__doc__
+
+    @property
+    def __call__(self):
+        return self.procedure
 
     async def execute(
         self,
@@ -141,10 +144,10 @@ class registration_model:
         __log_extra = {"registration": str(self), "invocation": str(invocation)}
         try:
             logger.debug("trying to execute procedure", extra=__log_extra)
-            if self.is_async:
-                reply_payload = await self.procedure(self.session, invocation.payload)
+            if asyncio.iscoroutinefunction(self.procedure):
+                reply_payload = await self.procedure(invocation.payload)
             else:
-                reply_payload = await asyncio.to_thread(self.procedure, self.session, invocation.payload)
+                reply_payload = await asyncio.to_thread(self.procedure, invocation.payload)
             return reply_event_model(call_id=invocation.id, is_error=False, payload=reply_payload)
         except Exception as e:
             if isinstance(e, rpc_error):
@@ -184,13 +187,14 @@ class Almanet:
     ) -> None:
         if not all(isinstance(i, str) for i in addresses):
             raise ValueError("addresses must be a iterable of strings")
-        self.addresses = addresses
-        self._client = client
-        self.__pending_replies: typing.MutableMapping[str, asyncio.Future[reply_event_model]] = {}
-        self.__leave_callbacks: list[typing.Callable] = list()
         self.id = kwargs.get("id") or _shared.new_id()
         self.joined = False
+        self.addresses = addresses
+        self._client = client
         self.task_pool = _shared.task_pool()
+        self._post_join_event = _shared.observable(self.task_pool)
+        self._leave_event = _shared.observable(self.task_pool)
+        self.__pending_replies: typing.MutableMapping[str, asyncio.Future[reply_event_model]] = {}
 
     type __produce_args = tuple[str, typing.Any]
 
@@ -253,7 +257,7 @@ class Almanet:
         logger.debug(f"trying to consume {topic}/{channel}")
 
         messages_stream, stop_consumer = await self._client.consume(topic, channel)
-        self.__leave_callbacks.append(stop_consumer)
+        self._leave_event.add_observer(stop_consumer)
 
         messages_stream = self._serialize(messages_stream, payload_model)
 
@@ -288,17 +292,21 @@ class Almanet:
             logger.debug("successful commit", extra=__log_extra)
         logger.debug("reply event consumer end")
 
-    type __call_args = tuple[str, typing.Any]
+    type __call_args = tuple[typing.Any, typing.Any]
+
     class __call_kwargs(typing.TypedDict):
         timeout: typing.NotRequired[int]
 
     async def __call(
         self,
-        topic: str,
+        topic: str | registration_model,
         payload: typing.Any,
         *,
         timeout: int = 60,
     ) -> reply_event_model:
+        if not isinstance(topic, str):
+            topic = topic.uri
+
         invocation = invoke_event_model(
             id=_shared.new_id(),
             caller_id=self.id,
@@ -346,6 +354,7 @@ class Almanet:
         )
 
     type __multicall_args = tuple[str, typing.Any]
+
     class __multicall_kwargs(typing.TypedDict):
         timeout: typing.NotRequired[int]
 
@@ -356,6 +365,9 @@ class Almanet:
         *,
         timeout: int = 60,
     ) -> list[reply_event_model]:
+        if not isinstance(topic, str):
+            topic = topic.uri
+
         invocation = invoke_event_model(
             id=_shared.new_id(),
             caller_id=self.id,
@@ -403,12 +415,12 @@ class Almanet:
 
     async def _consume_invocations(
         self,
-        r: registration_model,
+        registration: registration_model,
     ) -> None:
-        logger.debug(f"trying to register {r.topic}/{r.channel}")
-        messages_stream, _ = await self.consume(r.topic, r.channel)
+        logger.debug(f"trying to register {registration.uri}/{registration.channel}")
+        messages_stream, _ = await self.consume(f"_rpc_.{registration.uri}", registration.channel)
         async for message in messages_stream:
-            __log_extra = {"registration": str(r), "incoming_message": str(message)}
+            __log_extra = {"registration": str(registration), "incoming_message": str(message)}
             try:
                 invocation = invoke_event_model(**message.body)
                 __log_extra["invocation"] = str(invocation)
@@ -417,17 +429,17 @@ class Almanet:
                 if invocation.expired:
                     logger.warning("invocation expired", extra=__log_extra)
                 else:
-                    reply = await r.execute(invocation)
+                    reply = await registration.execute(invocation)
                     logger.debug("trying to reply", extra=__log_extra)
                     await self.produce(invocation.reply_topic, reply)
             except:
-                logger.exception("during parse invocation", extra=__log_extra)
+                logger.exception("during execute invocation", extra=__log_extra)
 
             await message.commit()
             logger.debug("successful commit", extra=__log_extra)
-        logger.debug(f"consumer {r.topic} down")
+        logger.debug(f"consumer {registration.uri} down")
 
-    async def register(
+    def register(
         self,
         topic: str,
         procedure: typing.Callable,
@@ -439,14 +451,15 @@ class Almanet:
         Returns the created registration.
         """
         r = registration_model(
-            topic=f"_rpc_.{topic}",
-            channel=channel,  # type: ignore
+            uri=topic,
+            channel=channel or "RPC",
             procedure=procedure,
             session=self,
         )
 
-        # schedules a task in the task_pool to consume invocations for this registration.
-        self.task_pool.schedule(self._consume_invocations(r))
+        self._post_join_event.add_observer(
+            lambda: self._consume_invocations(r)
+        )
 
         return r
 
@@ -462,11 +475,14 @@ class Almanet:
         await self._client.connect(self.addresses)
 
         consume_replies_ready = asyncio.Event()
-        self.task_pool.schedule(self._consume_replies(consume_replies_ready), daemon=True)
+        self.task_pool.schedule(
+            self._consume_replies(consume_replies_ready),
+            daemon=True,
+        )
         await consume_replies_ready.wait()
 
         self.joined = True
-
+        self._post_join_event.notify()
         logger.info(f"session {self.id} joined")
 
     async def __aenter__(self) -> "Almanet":
@@ -488,10 +504,9 @@ class Almanet:
 
         logger.debug(f"trying to leave {self.id} session, reason: {reason}")
 
-        stop_consume_replies = self.__leave_callbacks.pop(0)
+        stop_consume_replies = self._leave_event.observers.pop(0)
 
-        for callback in self.__leave_callbacks:
-            callback()
+        self._leave_event.notify()
 
         logger.debug(f"session {self.id} await task pool complete")
         await self.task_pool.complete()

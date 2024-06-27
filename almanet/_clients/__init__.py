@@ -1,7 +1,7 @@
-from ._ansq_ import *
+from ._ansq import *
 
 __all__ = [
-    *_ansq_.__all__,
+    *_ansq.__all__,
 ]
 
 

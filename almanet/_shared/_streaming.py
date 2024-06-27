@@ -19,6 +19,12 @@ async def merge_streams(*streams):
     It takes in any number of streams as arguments and continuously yields values from each stream until all streams are exhausted.
     """
     pending_tasks = [asyncio.create_task(anext(i)) for i in streams]
+
+    def refresh(task):
+        i = pending_tasks.index(task)
+        s = streams[i]
+        pending_tasks[i] = asyncio.create_task(anext(s))
+
     active = True
     while active:
         done_tasks, _ = await asyncio.wait(pending_tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -27,22 +33,15 @@ async def merge_streams(*streams):
             if isinstance(result, close_stream):
                 active = False
                 continue
+
             yield result
 
-            i = -1
-            for pt in pending_tasks:
-                i += 1
-                if pt is not dt:
-                    continue
-
-                s = streams[i]
-                pending_tasks[i] = asyncio.create_task(anext(s))
-                break
+            refresh(dt)
 
 
 def make_closable(
     stream,
-    on_close: typing.Callable[[], typing.Awaitable[None]] | None = None,
+    on_close: typing.Callable | None = None,
 ):
     """
     Makes an asynchronous stream closable.
@@ -55,8 +54,10 @@ def make_closable(
 
     async def on_close_stream():
         await close_event.wait()
-        if asyncio.iscoroutinefunction(on_close):
-            await on_close()
+        if callable(on_close):
+            maybe_coroutine = on_close()
+            if asyncio.iscoroutine(maybe_coroutine):
+                await maybe_coroutine
         yield close_stream()
 
     new_stream = merge_streams(stream, on_close_stream())

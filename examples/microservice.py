@@ -7,7 +7,6 @@ class access_denied(almanet.rpc_error):
 
 @example_service.procedure
 async def greeting(
-    session: almanet.Almanet,
     payload: str,  # is a data that was passed during invocation
 ) -> str:
     """

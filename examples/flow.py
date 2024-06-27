@@ -8,7 +8,6 @@ state_complete = almanet.observable_state(example_service, "complete")
 
 @state_initial.transition_from(state_any)
 async def create(
-    session: almanet.Almanet,
     name: str,
     **kwargs,
 ) -> str:
@@ -17,12 +16,10 @@ async def create(
 
 @state_complete.observe(state_initial)
 async def _complete(
-    session: almanet.Almanet,
     previous_result: str,
     **kwargs,
 ) -> None:
     print('_complete: ', previous_result)
-
 
 if __name__ == "__main__":
     example_service.serve()
