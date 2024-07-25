@@ -40,22 +40,25 @@ class transition:
         return self.description
 
     @property
-    def uri(self) -> str | None:
-        if self.registration is None:
-            return None
-        return self.registration.uri
-
-    @property
     def is_observer(self) -> bool:
         return self.priority > -1
+
+    @property
+    def uri(self) -> str | None:
+        if self.registration is None:
+            raise AttributeError("`observer` has no attribute `uri`")
+        return self.registration.uri
 
     def __call__(
         self,
         *args,
+        context: typing.MutableMapping | None = None,
         **kwargs,
     ):
-        result = self.procedure(*args, **kwargs, transition=self)
-        self.target.notify(result)
+        if context is None:
+            context = {}
+        result = self.procedure(*args, **kwargs, context=context, transition=self)
+        self.target.notify(context)
         return result
 
 
@@ -66,10 +69,13 @@ class async_transition(transition):
     async def __call__(
         self,
         *args,
+        context: typing.MutableMapping | None = None,
         **kwargs,
     ):
-        result = await self.procedure(*args, **kwargs, transition=self)
-        self.target.notify(result)
+        if context is None:
+            context = {}
+        result = await self.procedure(*args, **kwargs, context=context, transition=self)
+        self.target.notify(context)
         return result
 
 
@@ -78,7 +84,6 @@ _state_label_re = re.compile("[A-Za-z_]+")
 
 @_shared.dataclass(slots=True)
 class _state:
-
     service: _microservice.microservice
     label: str
     description: str | None = None
@@ -121,9 +126,13 @@ class _state:
         )
 
         if not instance.is_observer:
+            payload_model, return_model = _shared.extract_annotations(procedure)
             instance.registration = self.service.register_procedure(
                 instance.__call__,
                 label=label,
+                description=description,
+                payload_model=payload_model,
+                return_model=return_model,
             )
 
         for i in sources:
@@ -139,6 +148,7 @@ class _state:
     ):
         def wrap(function):
             return self._add_transition(sources, procedure=function, **extra)
+
         return wrap
 
 
@@ -151,36 +161,28 @@ class priorities:
     highest = 100
 
 
-class flow_execution_error(Exception):
-    ...
+class flow_execution_error(Exception): ...
 
 
 @_shared.dataclass(slots=True)
 class observable_state(_state):
-
     @property
     def observers(self) -> list[transition]:
         return [i for i in self._transitions if i.is_observer]
 
     async def next(
         self,
-        previous_result: typing.Any,
-        **kwargs,
+        context,
     ) -> typing.Any:
         _logger.debug(f"{self.label} begin")
 
-        if previous_result is None:
-            previous_result = []
-        if not isinstance(previous_result, list):
-            previous_result = [previous_result]
-
         for observer in self.observers:
-            _logger.debug(f"trying to call {observer.label} observer {previous_result}")
+            _logger.debug(f"trying to call {observer.label} observer")
             try:
                 if observer._is_async:
-                    result = await observer(*previous_result, **kwargs)
+                    result = await observer(context=context)
                 else:
-                    result = await asyncio.to_thread(observer, *previous_result, **kwargs)
+                    result = await asyncio.to_thread(observer, context=context)
                 _logger.debug(f"{observer.label} observer end")
                 return result
             except Exception as e:
@@ -191,6 +193,7 @@ class observable_state(_state):
 
     def __post_init__(self):
         super(observable_state, self).__post_init__()
+        # TODO: better to consume
         self.service.register_procedure(
             self.next,
             label=self.label,
@@ -200,12 +203,9 @@ class observable_state(_state):
 
     def notify(
         self,
-        previous_result,
-    ) -> asyncio.Task:
-        return self.service.session.call(
-            self.service._make_uri(self.label),
-            previous_result,
-        )
+        context,
+    ):
+        self.service.session.call(self.service._make_uri(self.label), context)
 
     def _add_observer(
         self,
@@ -228,6 +228,7 @@ class observable_state(_state):
     ):
         def wrap(function):
             return self._add_observer(sources=sources, procedure=function, **extra)
+
         return wrap
 
     def __hash__(self) -> int:
@@ -235,7 +236,6 @@ class observable_state(_state):
 
 
 class next_observer(Exception):
-
     def __init__(self, reason: str, *args):
         if not isinstance(reason, str):
             raise ValueError("`reason` must be `string`")

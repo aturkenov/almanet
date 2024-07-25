@@ -1,5 +1,6 @@
 import functools
 import inspect
+import typing
 
 from . import _decoding
 from . import _schema
@@ -9,9 +10,8 @@ __all__ = ["validate_execution"]
 
 def validate_execution(
     function,
-    *,
-    validate_payload: bool = True,
-    validate_return: bool = True,
+    payload_model=...,
+    return_model=...,
 ):
     """
     Takes a function as input and returns a decorator.
@@ -19,20 +19,17 @@ def validate_execution(
 
     Args:
     - function: the function to decorate with validator
-    - validate_payload: if True, the payload of the function is validated.
-    - validate_return: if True, the return of the function is validated.
+    - payload_model: the model of the input
+    - return_model: the model of the output
     """
-    payload_annotation, return_annotation = _schema.extract_annotations(function)
+    payload_model, return_model = _schema.extract_annotations(function, payload_model, return_model)
 
-    if not validate_payload or payload_annotation is ...:
-        payload_validator = lambda v: v
-    else:
-        payload_validator = _decoding.serialize(payload_annotation)
+    def dont_validate(v):
+        return v
 
-    if not validate_return or return_annotation is ...:
-        return_validator = lambda v: v
-    else:
-        return_validator = _decoding.serialize(return_annotation)
+    payload_validator = dont_validate if payload_model is ... else _decoding.serialize(payload_model)
+
+    return_validator = dont_validate if return_model is ... else _decoding.serialize(return_model)
 
     @functools.wraps(function)
     async def async_decorator(payload, *args, **kwargs):

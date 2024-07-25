@@ -35,7 +35,7 @@ class microservice:
     def _share_self_schema(
         self,
         **extra,
-    ):
+    ) -> None:
         async def procedure(*args, **kwargs):
             return {
                 'client': self.session.id,
@@ -93,7 +93,7 @@ class microservice:
         validate: typing.NotRequired[bool]
         include_to_api: typing.NotRequired[bool]
         title: typing.NotRequired[str]
-        description: typing.NotRequired[str]
+        description: typing.NotRequired[str | None]
         tags: typing.NotRequired[set[str]]
         payload_model: typing.NotRequired[typing.Any]
         return_model: typing.NotRequired[typing.Any]
@@ -102,28 +102,27 @@ class microservice:
         self,
         procedure: typing.Callable,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ):
-        label = kwargs.get('label', procedure.__name__)
+    ) -> "_almanet.registration_model":
+        label = kwargs.pop('label', procedure.__name__)
         uri = self._make_uri(label)
 
+        payload_model = kwargs.pop('payload_model', ...)
+        return_model = kwargs.pop('return_model', ...)
         if kwargs.get('validate', True):
-            procedure = _shared.validate_execution(procedure)
+            procedure = _shared.validate_execution(
+                procedure, payload_model, return_model
+            )
 
-        registration = self.session.register(uri, procedure, channel=kwargs.get('channel'))
+        registration = self.session.register(
+            uri, procedure, channel=kwargs.pop('channel', None)
+        )
 
         if kwargs.get('include_to_api', True):
             procedure_schema = _shared.describe_function(
-                procedure,
-                kwargs.get('description'),
-                kwargs.get('payload_model', ...),
-                kwargs.get('return_model', ...),
+                procedure, kwargs.pop('description'), payload_model, return_model,
             )
             self._share_procedure_schema(
-                uri,
-                registration.channel,
-                title=kwargs.get('title'),
-                tags=kwargs.get('tags'),
-                **procedure_schema,
+                uri, registration.channel, **kwargs, **procedure_schema,  # type: ignore
             )
 
         return registration
@@ -141,13 +140,11 @@ class microservice:
             return lambda function: self.register_procedure(function, **kwargs)
         return self.register_procedure(function, **kwargs)
 
-    def serve(self):
+    def serve(self) -> None:
         """
         Runs an event loop to serve the microservice.
         """
-        self.session._post_join_event.add_observer(
-            self._share_self_schema
-        )
+        self.session._post_join_event.add_observer(self._share_self_schema)
 
         loop = asyncio.new_event_loop()
         loop.create_task(
