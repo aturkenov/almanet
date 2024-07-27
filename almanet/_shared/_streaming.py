@@ -1,10 +1,7 @@
 import asyncio
 import typing
 
-__all__ = [
-    "merge_streams",
-    "make_closable"
-]
+__all__ = ["merge_streams", "make_closable"]
 
 
 class close_stream(StopAsyncIteration):

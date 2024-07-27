@@ -39,13 +39,13 @@ import almanet
 ```python
 example_service = almanet.new_service(
     "localhost:4150",
-    prefix="net.example"
+    prepath="net.example"
 )
 ```
 
 _Arguments_:
 - the TCP addresses of the NSQ instances
-- prefix for the service's procedures, helping in identifying and organizing them
+- prepath for the service's procedures, helping in identifying and organizing them
 
 #### Define your custom exception
 ```python

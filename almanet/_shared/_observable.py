@@ -2,13 +2,10 @@ import asyncio
 
 from . import _task_pool
 
-__all__ = [
-    "observable"
-]
+__all__ = ["observable"]
 
 
 class observable:
-
     def __init__(
         self,
         task_pool: _task_pool.task_pool,
@@ -25,6 +22,7 @@ class observable:
 
     def notify(self, *args, **kwargs):
         for observer in self.observers:
+            # FIXME
             maybe_coroutine = observer(*args, **kwargs)
             if asyncio.iscoroutine(maybe_coroutine):
                 self._task_pool.schedule(maybe_coroutine)

@@ -4,6 +4,7 @@ import almanet
 
 from examples import microservice
 
+
 async def main():
     # create new session
     session = almanet.new_session("localhost:4150")
@@ -31,5 +32,6 @@ async def main():
             await session.call("net.example.greeting", "guest")
         except almanet.rpc_error as e:
             print("during call net.example.greeting('guest'):", e)
+
 
 asyncio.run(main())

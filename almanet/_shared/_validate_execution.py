@@ -1,6 +1,5 @@
 import functools
 import inspect
-import typing
 
 from . import _decoding
 from . import _schema
