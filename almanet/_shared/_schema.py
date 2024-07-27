@@ -12,9 +12,13 @@ __all__ = [
 
 def extract_annotations(
     function: typing.Callable,
+    payload_annotation=...,
+    return_annotation=...,
 ):
-    payload_annotation = function.__annotations__.get('payload', ...)
-    return_annotation = function.__annotations__.get('return', ...)
+    if payload_annotation is ...:
+        payload_annotation = function.__annotations__.get("payload", ...)
+    if return_annotation is ...:
+        return_annotation = function.__annotations__.get("return", ...)
     return payload_annotation, return_annotation
 
 
@@ -30,33 +34,21 @@ def generate_json_schema(annotation):
 
 
 def describe_function(
-    f: typing.Callable,
+    target: typing.Callable,
     description: str | None = None,
-    payload_model: typing.Any = ...,
-    return_model: typing.Any = ...,
+    payload_annotation=...,
+    return_annotation=...,
 ):
     """
-    Returns a dictionary containing the description, payload model, and return model of the function.
+    Generates a JSON schema from a function.
     """
     if description is None:
-        description = f.__doc__
-
-    if payload_model is ...:
-        payload_annotation = f.__annotations__.get('payload', ...)
-    else:
-        payload_annotation = payload_model
-
+        description = target.__doc__
+    payload_annotation, return_annotation = extract_annotations(target, payload_annotation, return_annotation)
     payload_json_schema = generate_json_schema(payload_annotation)
-
-    if return_model is ...:
-        return_annotation = f.__annotations__.get('return', ...)
-    else:
-        return_annotation = return_model
-
     return_json_schema = generate_json_schema(return_annotation)
-
     return {
-        'description': description,
-        'payload_json_schema': payload_json_schema,
-        'return_json_schema': return_json_schema,
+        "description": description,
+        "payload_json_schema": payload_json_schema,
+        "return_json_schema": return_json_schema,
     }

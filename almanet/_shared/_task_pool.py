@@ -30,9 +30,7 @@ class task_pool:
         - daemon: if True, the task is marked as a daemon task.
         """
         task = asyncio.create_task(coroutine)
-        task.add_done_callback(
-            lambda _: self._tasks.discard(task)
-        )
+        task.add_done_callback(lambda _: self._tasks.discard(task))
         self._tasks.add(task)
         if daemon:
             self._daemons.add(task)

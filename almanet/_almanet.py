@@ -223,9 +223,7 @@ class Almanet:
         """
         Produce a message with a specified topic and payload.
         """
-        return self.task_pool.schedule(
-            self.__produce(*args)
-        )
+        return self.task_pool.schedule(self.__produce(*args))
 
     async def _serialize[T: typing.Any](
         self,
@@ -349,9 +347,7 @@ class Almanet:
         Call a procedure with a specified topic and payload.
         Returns a reply event.
         """
-        return self.task_pool.schedule(
-            self.__call(*args, **kwargs)
-        )
+        return self.task_pool.schedule(self.__call(*args, **kwargs))
 
     type __multicall_args = tuple[str, typing.Any]
 
@@ -409,9 +405,7 @@ class Almanet:
         Call simultaneously multiple procedures with a specified topic and payload.
         Returns a list of reply events.
         """
-        return self.task_pool.schedule(
-            self.__multicall(*args, **kwargs)
-        )
+        return self.task_pool.schedule(self.__multicall(*args, **kwargs))
 
     async def _consume_invocations(
         self,
@@ -457,9 +451,7 @@ class Almanet:
             session=self,
         )
 
-        self._post_join_event.add_observer(
-            lambda: self._consume_invocations(r)
-        )
+        self._post_join_event.add_observer(lambda: self._consume_invocations(r))
 
         return r
 

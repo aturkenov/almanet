@@ -7,10 +7,10 @@ from ._microservice import *
 __all__ = [
     *_almanet.__all__,
     "clients",
-    'new_session',
+    "new_session",
     *_flow.__all__,
     *_microservice.__all__,
-    'new_microservice',
+    "new_microservice",
 ]
 
 
@@ -22,11 +22,7 @@ def new_session(
     """
     Returns a new instance of Almanet session.
     """
-    return Almanet(
-        *addresses,
-        client=client_klass(),
-        **kwargs
-    )
+    return Almanet(*addresses, client=client_klass(), **kwargs)
 
 
 def new_microservice(

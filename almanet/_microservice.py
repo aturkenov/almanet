@@ -16,10 +16,11 @@ class microservice:
 
     class _kwargs(typing.TypedDict):
         """
-        - prefix: is used to prepend a label to the procedure's topic.
+        - prepath: is used to prepend a path to the procedure's topic.
         - tags: are used to categorize the procedures.
         """
-        prefix: typing.NotRequired[str]
+
+        prepath: typing.NotRequired[str]
         tags: typing.NotRequired[typing.Set[str]]
 
     def __init__(
@@ -28,24 +29,24 @@ class microservice:
         **kwargs: typing.Unpack[_kwargs],
     ):
         self._routes = set()
-        self.pre = kwargs.get('prefix')
-        self.tags = set(kwargs.get('tags') or [])
+        self.pre = kwargs.get("prepath")
+        self.tags = set(kwargs.get("tags") or [])
         self.session = session
 
     def _share_self_schema(
         self,
         **extra,
-    ):
+    ) -> None:
         async def procedure(*args, **kwargs):
             return {
-                'client': self.session.id,
-                'version': self.session.version,
-                'routes': list(self._routes),
+                "client": self.session.id,
+                "version": self.session.version,
+                "routes": list(self._routes),
                 **extra,
             }
 
         self.session.register(
-            '_api_schema_.client',
+            "_api_schema_.client",
             procedure,
             channel=self.session.id,
         )
@@ -61,31 +62,31 @@ class microservice:
             tags = set()
         tags |= self.tags
         if len(tags) == 0:
-            tags = {'Default'}
+            tags = {"Default"}
 
         async def procedure(*args, **kwargs):
             return {
-                'client': self.session.id,
-                'version': self.session.version,
-                'uri': uri,
-                'channel': channel,
-                'tags': tags,
+                "client": self.session.id,
+                "version": self.session.version,
+                "uri": uri,
+                "channel": channel,
+                "tags": tags,
                 **extra,
             }
 
         self.session.register(
-            f'_api_schema_.{uri}.{channel}',
+            f"_api_schema_.{uri}.{channel}",
             procedure,
             channel=channel,
         )
 
-        self._routes.add(f'{uri}/{channel}')
+        self._routes.add(f"{uri}/{channel}")
 
     def _make_uri(
         self,
         subtopic: str,
     ) -> str:
-        return f'{self.pre}.{subtopic}' if isinstance(self.pre, str) else subtopic
+        return f"{self.pre}.{subtopic}" if isinstance(self.pre, str) else subtopic
 
     class _register_procedure_kwargs(typing.TypedDict):
         label: typing.NotRequired[str]
@@ -93,7 +94,7 @@ class microservice:
         validate: typing.NotRequired[bool]
         include_to_api: typing.NotRequired[bool]
         title: typing.NotRequired[str]
-        description: typing.NotRequired[str]
+        description: typing.NotRequired[str | None]
         tags: typing.NotRequired[set[str]]
         payload_model: typing.NotRequired[typing.Any]
         return_model: typing.NotRequired[typing.Any]
@@ -102,28 +103,29 @@ class microservice:
         self,
         procedure: typing.Callable,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ):
-        label = kwargs.get('label', procedure.__name__)
+    ) -> "_almanet.registration_model":
+        label = kwargs.pop("label", procedure.__name__)
         uri = self._make_uri(label)
 
-        if kwargs.get('validate', True):
-            procedure = _shared.validate_execution(procedure)
+        payload_model = kwargs.pop("payload_model", ...)
+        return_model = kwargs.pop("return_model", ...)
+        if kwargs.get("validate", True):
+            procedure = _shared.validate_execution(procedure, payload_model, return_model)
 
-        registration = self.session.register(uri, procedure, channel=kwargs.get('channel'))
+        registration = self.session.register(uri, procedure, channel=kwargs.pop("channel", None))
 
-        if kwargs.get('include_to_api', True):
+        if kwargs.get("include_to_api", True):
             procedure_schema = _shared.describe_function(
                 procedure,
-                kwargs.get('description'),
-                kwargs.get('payload_model', ...),
-                kwargs.get('return_model', ...),
+                kwargs.pop("description"),
+                payload_model,
+                return_model,
             )
             self._share_procedure_schema(
                 uri,
                 registration.channel,
-                title=kwargs.get('title'),
-                tags=kwargs.get('tags'),
-                **procedure_schema,
+                **kwargs,  # type: ignore
+                **procedure_schema,  # type: ignore
             )
 
         return registration
@@ -141,16 +143,12 @@ class microservice:
             return lambda function: self.register_procedure(function, **kwargs)
         return self.register_procedure(function, **kwargs)
 
-    def serve(self):
+    def serve(self) -> None:
         """
         Runs an event loop to serve the microservice.
         """
-        self.session._post_join_event.add_observer(
-            self._share_self_schema
-        )
+        self.session._post_join_event.add_observer(self._share_self_schema)
 
         loop = asyncio.new_event_loop()
-        loop.create_task(
-            self.session.join()
-        )
+        loop.create_task(self.session.join())
         loop.run_forever()

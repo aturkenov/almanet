@@ -36,15 +36,16 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 
 [tool.ruff.format]
 quote-style = "double"
 
 [tool.ruff.lint]
-ignore = ["E731", "F403", "F405"]
+ignore = ["E722", "E731", "F403", "F405"]
 
 [tool.pyright]
 include = ["almanet"]
 typeCheckingMode = "basic"
 reportAssignmentType = "warning"
+reportUnsupportedDunderAll = "none"
