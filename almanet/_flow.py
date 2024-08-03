@@ -100,6 +100,7 @@ class _state:
         procedure: typing.Callable,
         label: str | None = None,
         description: str | None = None,
+        register: bool = True,
         **extra,
     ):
         if not callable(procedure):
@@ -125,7 +126,7 @@ class _state:
             **extra,
         )
 
-        if not instance.is_observer:
+        if register:
             payload_model, return_model = _shared.extract_annotations(procedure)
             instance.registration = self.service.register_procedure(
                 instance.__call__,
@@ -227,7 +228,12 @@ class observable_state(_state):
         **extra,
     ):
         def wrap(function):
-            return self._add_observer(sources=sources, procedure=function, **extra)
+            return self._add_observer(
+                sources=sources,
+                procedure=function,
+                register=False,
+                **extra,
+            )
 
         return wrap
 
