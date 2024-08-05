@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ._decoding import *
 from ._encoding import *
@@ -12,6 +12,7 @@ from ._is_valid_uri import *
 
 __all__ = [
     "dataclass",
+    "field",
     *_decoding.__all__,
     *_encoding.__all__,
     *_new_id.__all__,

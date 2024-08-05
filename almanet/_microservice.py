@@ -9,6 +9,53 @@ __all__ = [
 ]
 
 
+@_shared.dataclass
+class abstract_procedure_model:
+    microservice: "microservice"
+    procedure: typing.Callable
+    label: str = ...
+    channel: str | None = None
+    include_to_api: bool = True
+    description: str | None = None
+    tags: set[str] = _shared.field(default_factory=set)
+    validate: bool = True
+    payload_model: typing.Any = ...
+    return_model: typing.Any = ...
+
+    @property
+    def uri(self):
+        return self.microservice._make_uri(self.label)
+
+    def __post_init__(self):
+        if not callable(self.procedure):
+            raise ValueError("decorated function must be callable")
+        if self.label is ...:
+            self.label = self.procedure.__name__
+        if self.description is None:
+            self.description = self.procedure.__doc__
+        self.payload_model, self.return_model = _shared.extract_annotations(
+            self.procedure,
+            self.payload_model,
+            self.return_model
+        )
+
+    def implementation(
+        self,
+        real_procedure: typing.Callable,
+    ) -> _almanet.registration_model:
+        return self.microservice.register_procedure(
+            real_procedure,
+            label=self.label,
+            channel=self.channel,
+            include_to_api=self.include_to_api,
+            description=self.description,
+            tags=self.tags,
+            validate=self.validate,
+            payload_model=self.payload_model,
+            return_model=self.return_model,
+        )
+
+
 class microservice:
     """
     Represents a microservice that can be used to register procedures (functions) with a session.
@@ -90,12 +137,11 @@ class microservice:
 
     class _register_procedure_kwargs(typing.TypedDict):
         label: typing.NotRequired[str]
-        channel: typing.NotRequired[str]
-        validate: typing.NotRequired[bool]
+        channel: typing.NotRequired[str | None]
         include_to_api: typing.NotRequired[bool]
-        title: typing.NotRequired[str]
         description: typing.NotRequired[str | None]
         tags: typing.NotRequired[set[str]]
+        validate: typing.NotRequired[bool]
         payload_model: typing.NotRequired[typing.Any]
         return_model: typing.NotRequired[typing.Any]
 
@@ -104,6 +150,9 @@ class microservice:
         procedure: typing.Callable,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
     ) -> "_almanet.registration_model":
+        if not callable(procedure):
+            raise ValueError("decorated function must be callable")
+
         label = kwargs.pop("label", procedure.__name__)
         uri = self._make_uri(label)
 
@@ -142,6 +191,15 @@ class microservice:
         if function is None:
             return lambda function: self.register_procedure(function, **kwargs)
         return self.register_procedure(function, **kwargs)
+
+    def abstract_procedure(
+        self,
+        function: typing.Callable | None = None,
+        **kwargs: typing.Unpack[_register_procedure_kwargs],
+    ):
+        if function is None:
+            return lambda function: abstract_procedure_model(self, function, **kwargs)
+        return abstract_procedure_model(self, function, **kwargs)
 
     def serve(self) -> None:
         """
