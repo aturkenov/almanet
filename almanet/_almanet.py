@@ -6,6 +6,9 @@ import pydantic_core
 
 from . import _shared
 
+if typing.TYPE_CHECKING:
+    from . import _microservice
+
 __all__ = [
     "Almanet",
     "client_iface",
@@ -294,16 +297,25 @@ class Almanet:
 
     class __call_kwargs(typing.TypedDict):
         timeout: typing.NotRequired[int]
+        return_model: typing.NotRequired[typing.Any]
 
     async def __call(
         self,
-        topic: str | registration_model,
+        topic: typing.Union[str, "_microservice.abstract_procedure_model"],
         payload: typing.Any,
         *,
         timeout: int = 60,
+        return_model: typing.Any = ...,
     ) -> reply_event_model:
         if not isinstance(topic, str):
+            if return_model is ...:
+                return_model = topic.return_model
             topic = topic.uri
+
+        if return_model is ...:
+            serialize_return = lambda x: x
+        else:
+            serialize_return = _shared.serialize(return_model)
 
         invocation = invoke_event_model(
             id=_shared.new_id(),
@@ -331,6 +343,9 @@ class Almanet:
                         response.payload["message"],
                         name=response.payload["name"],
                     )
+
+                response.payload = serialize_return(response.payload)
+
                 return response
         except Exception as e:
             logger.error("during call", extra={**__log_extra, "error": repr(e)})
@@ -356,7 +371,7 @@ class Almanet:
 
     async def __multicall(
         self,
-        topic: str,
+        topic: typing.Union[str, "_microservice.abstract_procedure_model"],
         payload: typing.Any,
         *,
         timeout: int = 60,
