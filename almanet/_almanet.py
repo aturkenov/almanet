@@ -136,9 +136,8 @@ class registration_model:
     def __doc__(self):
         return self.procedure.__doc__
 
-    @property
-    def __call__(self):
-        return self.procedure
+    def __call__(self, *args, **kwargs):
+        return self.procedure(*args, **kwargs)
 
     async def execute(
         self,
@@ -147,10 +146,7 @@ class registration_model:
         __log_extra = {"registration": str(self), "invocation": str(invocation)}
         try:
             logger.debug("trying to execute procedure", extra=__log_extra)
-            if asyncio.iscoroutinefunction(self.procedure):
-                reply_payload = await self.procedure(invocation.payload)
-            else:
-                reply_payload = await asyncio.to_thread(self.procedure, invocation.payload)
+            reply_payload = await self.procedure(invocation.payload)
             return reply_event_model(call_id=invocation.id, is_error=False, payload=reply_payload)
         except Exception as e:
             if isinstance(e, rpc_error):
@@ -197,11 +193,11 @@ class Almanet:
         self.task_pool = _shared.task_pool()
         self._post_join_event = _shared.observable(self.task_pool)
         self._leave_event = _shared.observable(self.task_pool)
-        self.__pending_replies: typing.MutableMapping[str, asyncio.Future[reply_event_model]] = {}
+        self._pending_replies: typing.MutableMapping[str, asyncio.Future[reply_event_model]] = {}
 
-    type __produce_args = tuple[str, typing.Any]
+    type _produce_args = tuple[str, typing.Any]
 
-    async def __produce(
+    async def _produce(
         self,
         topic: str,
         payload: typing.Any,
@@ -221,12 +217,12 @@ class Almanet:
 
     def produce(
         self,
-        *args: typing.Unpack[__produce_args],
+        *args: typing.Unpack[_produce_args],
     ) -> asyncio.Task[None]:
         """
         Produce a message with a specified topic and payload.
         """
-        return self.task_pool.schedule(self.__produce(*args))
+        return self.task_pool.schedule(self._produce(*args))
 
     async def _serialize[T: typing.Any](
         self,
@@ -281,7 +277,7 @@ class Almanet:
                 __log_extra["reply"] = str(reply)
                 logger.debug("new reply", extra=__log_extra)
 
-                pending = self.__pending_replies.get(reply.call_id)
+                pending = self._pending_replies.get(reply.call_id)
                 if pending is None:
                     logger.warning("pending event not found", extra=__log_extra)
                 else:
@@ -293,29 +289,31 @@ class Almanet:
             logger.debug("successful commit", extra=__log_extra)
         logger.debug("reply event consumer end")
 
-    type __call_args = tuple[typing.Any, typing.Any]
+    type _call_args = tuple[typing.Union[str, "_microservice.abstract_procedure_model"], typing.Any]
 
-    class __call_kwargs(typing.TypedDict):
+    class _call_kwargs[R: typing.Any](typing.TypedDict):
         timeout: typing.NotRequired[int]
-        return_model: typing.NotRequired[typing.Any]
+        result_model: typing.NotRequired[R]
 
-    async def __call(
+    async def _call[R: typing.Any](
         self,
         topic: typing.Union[str, "_microservice.abstract_procedure_model"],
         payload: typing.Any,
         *,
         timeout: int = 60,
-        return_model: typing.Any = ...,
-    ) -> reply_event_model:
-        if not isinstance(topic, str):
-            if return_model is ...:
-                return_model = topic.return_model
-            topic = topic.uri
-
-        if return_model is ...:
-            serialize_return = lambda x: x
+        result_model: R = ...,
+    ) -> tuple[R, reply_event_model]:
+        if isinstance(topic, str):
+            uri = topic
         else:
-            serialize_return = _shared.serialize(return_model)
+            uri = topic.uri
+            if result_model is ...:
+                result_model = topic.return_model
+
+        if result_model is ...:
+            serialize_result = lambda x: x
+        else:
+            serialize_result = _shared.serialize(result_model)
 
         invocation = invoke_event_model(
             id=_shared.new_id(),
@@ -324,60 +322,62 @@ class Almanet:
             reply_topic=f"_rpc_._reply_.{self.id}",
         )
 
-        __log_extra = {"topic": topic, "timeout": timeout, "invoke_event": str(invocation)}
+        __log_extra = {"uri": uri, "timeout": timeout, "invoke_event": str(invocation)}
         logger.debug("trying to call", extra=__log_extra)
 
         pending_reply_event = asyncio.Future[reply_event_model]()
-        self.__pending_replies[invocation.id] = pending_reply_event
+        self._pending_replies[invocation.id] = pending_reply_event
 
         try:
             async with asyncio.timeout(timeout):
-                await self.produce(f"_rpc_.{topic}", invocation)
+                await self.produce(f"_rpc_.{uri}", invocation)
 
-                response = await pending_reply_event
-                __log_extra["reply_event"] = str(response)
+                reply_event = await pending_reply_event
+                __log_extra["reply_event"] = str(reply_event)
                 logger.debug("new reply event", extra=__log_extra)
 
-                if response.is_error:
+                if reply_event.is_error:
                     raise rpc_error(
-                        response.payload["message"],
-                        name=response.payload["name"],
+                        reply_event.payload["message"],
+                        name=reply_event.payload["name"],
                     )
 
-                response.payload = serialize_return(response.payload)
+                result = serialize_result(reply_event.payload)
 
-                return response
+                return result, reply_event
+        except pydantic_core.ValidationError as e:
+            logger.error(f"invalid result from {uri}", extra={**__log_extra, "error": repr(e)})
+            raise e
         except Exception as e:
-            logger.error("during call", extra={**__log_extra, "error": repr(e)})
+            logger.error(f"during call {uri}", extra={**__log_extra, "error": repr(e)})
             raise e
         finally:
-            self.__pending_replies.pop(invocation.id)
+            self._pending_replies.pop(invocation.id)
 
-    def call(
+    def call[R: typing.Any](
         self,
-        *args: typing.Unpack[__call_args],
-        **kwargs: typing.Unpack[__call_kwargs],
-    ) -> asyncio.Task[reply_event_model]:
+        *args: typing.Unpack[_call_args],
+        **kwargs: typing.Unpack[_call_kwargs[R]],
+    ) -> asyncio.Task[tuple[R, reply_event_model]]:
         """
         Call a procedure with a specified topic and payload.
         Returns a reply event.
         """
-        return self.task_pool.schedule(self.__call(*args, **kwargs))
+        return self.task_pool.schedule(self._call(*args, **kwargs))
 
-    type __multicall_args = tuple[str, typing.Any]
+    type _multicall_args = tuple[typing.Union[str, "_microservice.abstract_procedure_model"], typing.Any]
 
-    class __multicall_kwargs(typing.TypedDict):
+    class _multicall_kwargs(typing.TypedDict):
         timeout: typing.NotRequired[int]
 
-    async def __multicall(
+    async def _multicall(
         self,
         topic: typing.Union[str, "_microservice.abstract_procedure_model"],
         payload: typing.Any,
         *,
         timeout: int = 60,
     ) -> list[reply_event_model]:
-        if not isinstance(topic, str):
-            topic = topic.uri
+        uri = topic if isinstance(topic, str) else topic.uri
 
         invocation = invoke_event_model(
             id=_shared.new_id(),
@@ -386,14 +386,14 @@ class Almanet:
             reply_topic=f"_rpc_._replies_.{self.id}",
         )
 
-        __log_extra = {"topic": topic, "timeout": timeout, "invoke_event": str(invocation)}
+        __log_extra = {"uri": uri, "timeout": timeout, "invoke_event": str(invocation)}
 
         messages_stream, stop_consumer = await self.consume(invocation.reply_topic, "rpc-recipient")
 
         result = []
         try:
             async with asyncio.timeout(timeout):
-                await self.produce(f"_rpc_.{topic}", invocation)
+                await self.produce(f"_rpc_.{uri}", invocation)
 
                 async for message in messages_stream:
                     try:
@@ -407,20 +407,20 @@ class Almanet:
         except TimeoutError:
             stop_consumer()
 
-        logger.debug(f"multicall {topic} done")
+        logger.debug(f"multicall {uri} done")
 
         return result
 
     async def multicall(
         self,
-        *args: typing.Unpack[__multicall_args],
-        **kwargs: typing.Unpack[__multicall_kwargs],
+        *args: typing.Unpack[_multicall_args],
+        **kwargs: typing.Unpack[_multicall_kwargs],
     ) -> asyncio.Task[list[reply_event_model]]:
         """
         Call simultaneously multiple procedures with a specified topic and payload.
         Returns a list of reply events.
         """
-        return self.task_pool.schedule(self.__multicall(*args, **kwargs))
+        return self.task_pool.schedule(self._multicall(*args, **kwargs))
 
     async def _consume_invocations(
         self,

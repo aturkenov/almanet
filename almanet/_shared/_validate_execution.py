@@ -1,5 +1,5 @@
+import asyncio
 import functools
-import inspect
 
 from . import _decoding
 from . import _schema
@@ -31,18 +31,11 @@ def validate_execution(
     return_validator = dont_validate if return_model is ... else _decoding.serialize(return_model)
 
     @functools.wraps(function)
-    async def async_decorator(payload, *args, **kwargs):
-        payload = payload_validator(payload)
-        result = await function(payload, *args, **kwargs)
-        return return_validator(result)
-
-    if inspect.iscoroutinefunction(function):
-        return async_decorator
-
-    @functools.wraps(function)
-    def decorator(payload, *args, **kwargs):
+    async def decorator(payload, *args, **kwargs):
         payload = payload_validator(payload)
         result = function(payload, *args, **kwargs)
+        if asyncio.iscoroutine(result):
+            result = await result
         return return_validator(result)
 
     return decorator

@@ -22,7 +22,6 @@ class observable:
 
     def notify(self, *args, **kwargs):
         for observer in self.observers:
-            # FIXME
-            maybe_coroutine = observer(*args, **kwargs)
-            if asyncio.iscoroutine(maybe_coroutine):
-                self._task_pool.schedule(maybe_coroutine)
+            result = observer(*args, **kwargs)
+            if asyncio.iscoroutine(result):
+                self._task_pool.schedule(result)

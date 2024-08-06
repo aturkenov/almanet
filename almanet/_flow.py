@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import re
 import typing
@@ -29,7 +28,6 @@ class transition:
     description: str | None = None
     priority: int = -1
     registration: typing.Optional["_almanet.registration_model"] = None
-    _is_async = False
 
     @property
     def __name__(self) -> str:
@@ -48,23 +46,6 @@ class transition:
         if self.registration is None:
             raise AttributeError("`observer` has no attribute `uri`")
         return self.registration.uri
-
-    def __call__(
-        self,
-        *args,
-        context: typing.MutableMapping | None = None,
-        **kwargs,
-    ):
-        if context is None:
-            context = {}
-        result = self.procedure(*args, **kwargs, context=context, transition=self)
-        self.target.notify(context)
-        return result
-
-
-@_shared.dataclass(slots=True)
-class async_transition(transition):
-    _is_async = True
 
     async def __call__(
         self,
@@ -106,8 +87,6 @@ class _state:
         if not callable(procedure):
             raise ValueError("decorated function must be callable")
 
-        transition_class = async_transition if asyncio.iscoroutinefunction(procedure) else transition
-
         if label is None:
             label = procedure.__name__
 
@@ -117,7 +96,7 @@ class _state:
         if not all(isinstance(i, observable_state) for i in sources):
             raise ValueError(f"{label}: `target` must be `observable_state` instance")
 
-        instance = transition_class(
+        instance = transition(
             label=label,
             description=description,
             sources=set(sources),
@@ -180,10 +159,7 @@ class observable_state(_state):
         for observer in self.observers:
             _logger.debug(f"trying to call {observer.label} observer")
             try:
-                if observer._is_async:
-                    result = await observer(context=context)
-                else:
-                    result = await asyncio.to_thread(observer, context=context)
+                result = await observer(context=context)
                 _logger.debug(f"{observer.label} observer end")
                 return result
             except Exception as e:

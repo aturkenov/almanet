@@ -52,9 +52,9 @@ def make_closable(
     async def on_close_stream():
         await close_event.wait()
         if callable(on_close):
-            maybe_coroutine = on_close()
-            if asyncio.iscoroutine(maybe_coroutine):
-                await maybe_coroutine
+            result = on_close()
+            if asyncio.iscoroutine(result):
+                await result
         yield close_stream()
 
     new_stream = merge_streams(stream, on_close_stream())

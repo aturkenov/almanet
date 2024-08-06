@@ -14,46 +14,47 @@ class abstract_procedure_model:
     microservice: "microservice"
     procedure: typing.Callable
     label: str = ...
-    channel: str | None = None
     include_to_api: bool = True
     description: str | None = None
-    tags: set[str] = _shared.field(default_factory=set)
+    tags: set[str] | None = None
     validate: bool = True
     payload_model: typing.Any = ...
     return_model: typing.Any = ...
+    _has_implementation: bool = False
+
+    def __post_init__(self):
+        if not callable(self.procedure):
+            raise ValueError("decorated function must be callable")
+        if not isinstance(self.label, str):
+            self.label = self.procedure.__name__
+        if not isinstance(self.description, str):
+            self.description = self.procedure.__doc__
+        self.payload_model, self.return_model = _shared.extract_annotations(
+            self.procedure, self.payload_model, self.return_model
+        )
 
     @property
     def uri(self):
         return self.microservice._make_uri(self.label)
 
-    def __post_init__(self):
-        if not callable(self.procedure):
-            raise ValueError("decorated function must be callable")
-        if self.label is ...:
-            self.label = self.procedure.__name__
-        if self.description is None:
-            self.description = self.procedure.__doc__
-        self.payload_model, self.return_model = _shared.extract_annotations(
-            self.procedure,
-            self.payload_model,
-            self.return_model
-        )
-
-    def implementation(
+    def implements[F: typing.Callable](
         self,
-        real_procedure: typing.Callable,
-    ) -> _almanet.registration_model:
+        real_function: F,
+    ) -> F:
+        if self._has_implementation:
+            raise ValueError("procedure already implemented")
+        self._has_implementation = True
+
         return self.microservice.register_procedure(
-            real_procedure,
+            real_function,
             label=self.label,
-            channel=self.channel,
             include_to_api=self.include_to_api,
             description=self.description,
             tags=self.tags,
             validate=self.validate,
             payload_model=self.payload_model,
             return_model=self.return_model,
-        )
+        )  # type: ignore
 
 
 class microservice:
@@ -137,10 +138,9 @@ class microservice:
 
     class _register_procedure_kwargs(typing.TypedDict):
         label: typing.NotRequired[str]
-        channel: typing.NotRequired[str | None]
         include_to_api: typing.NotRequired[bool]
         description: typing.NotRequired[str | None]
-        tags: typing.NotRequired[set[str]]
+        tags: typing.NotRequired[set[str] | None]
         validate: typing.NotRequired[bool]
         payload_model: typing.NotRequired[typing.Any]
         return_model: typing.NotRequired[typing.Any]
@@ -149,7 +149,7 @@ class microservice:
         self,
         procedure: typing.Callable,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ) -> "_almanet.registration_model":
+    ) -> _almanet.registration_model:
         if not callable(procedure):
             raise ValueError("decorated function must be callable")
 
@@ -161,7 +161,7 @@ class microservice:
         if kwargs.get("validate", True):
             procedure = _shared.validate_execution(procedure, payload_model, return_model)
 
-        registration = self.session.register(uri, procedure, channel=kwargs.pop("channel", None))
+        registration = self.session.register(uri, procedure)
 
         if kwargs.get("include_to_api", True):
             procedure_schema = _shared.describe_function(
@@ -173,30 +173,42 @@ class microservice:
             self._share_procedure_schema(
                 uri,
                 registration.channel,
-                **kwargs,  # type: ignore
-                **procedure_schema,  # type: ignore
+                **kwargs,
+                **procedure_schema,
             )
 
         return registration
 
-    def procedure(
+    def procedure[F: typing.Callable](
         self,
-        function: typing.Callable | None = None,
+        function: F | None = None,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ):
+    ) -> F:
         """
         Allows you to easily add procedures (functions) to a microservice by using a decorator.
         Returns a decorated function.
         """
         if function is None:
-            return lambda function: self.register_procedure(function, **kwargs)
+            return lambda function: self.register_procedure(function, **kwargs)  # type: ignore
         return self.register_procedure(function, **kwargs)
+
+    @typing.overload
+    def abstract_procedure(
+        self,
+        **kwargs: typing.Unpack[_register_procedure_kwargs],
+    ) -> typing.Callable[[typing.Callable], abstract_procedure_model]: ...
+
+    @typing.overload
+    def abstract_procedure(
+        self,
+        function: typing.Callable,
+    ) -> abstract_procedure_model: ...
 
     def abstract_procedure(
         self,
         function: typing.Callable | None = None,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ):
+    ) -> abstract_procedure_model | typing.Callable[..., abstract_procedure_model]:
         if function is None:
             return lambda function: abstract_procedure_model(self, function, **kwargs)
         return abstract_procedure_model(self, function, **kwargs)
