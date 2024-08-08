@@ -109,7 +109,7 @@ class _state:
             payload_model, return_model = _shared.extract_annotations(procedure)
             instance.registration = self.service.register_procedure(
                 instance.__call__,
-                label=label,
+                path=label,
                 description=description,
                 payload_model=payload_model,
                 return_model=return_model,
@@ -173,7 +173,7 @@ class observable_state(_state):
         # TODO: better to consume
         self.service.register_procedure(
             self.next,
-            label=self.label,
+            path=self.label,
             include_to_api=False,
             validate=False,
         )

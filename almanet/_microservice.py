@@ -13,7 +13,7 @@ __all__ = [
 class abstract_procedure_model[I, O]:
     microservice: "microservice"
     procedure: typing.Callable[[I], typing.Awaitable[O]]
-    label: str = ...
+    path: str = ...
     include_to_api: bool = True
     description: str | None = None
     tags: set[str] | None = None
@@ -25,8 +25,8 @@ class abstract_procedure_model[I, O]:
     def __post_init__(self):
         if not callable(self.procedure):
             raise ValueError("decorated function must be callable")
-        if not isinstance(self.label, str):
-            self.label = self.procedure.__name__
+        if not isinstance(self.path, str):
+            self.path = self.procedure.__name__
         if not isinstance(self.description, str):
             self.description = self.procedure.__doc__
         self.payload_model, self.return_model = _shared.extract_annotations(
@@ -35,7 +35,7 @@ class abstract_procedure_model[I, O]:
 
     @property
     def uri(self):
-        return self.microservice._make_uri(self.label)
+        return self.microservice._make_uri(self.path)
 
     def implements[F: typing.Callable[..., typing.Awaitable]](
         self,
@@ -47,7 +47,7 @@ class abstract_procedure_model[I, O]:
 
         return self.microservice.register_procedure(
             real_function,
-            label=self.label,
+            path=self.path,
             include_to_api=self.include_to_api,
             description=self.description,
             tags=self.tags,
@@ -137,7 +137,7 @@ class microservice:
         return f"{self.pre}.{subtopic}" if isinstance(self.pre, str) else subtopic
 
     class _register_procedure_kwargs(typing.TypedDict):
-        label: typing.NotRequired[str]
+        path: typing.NotRequired[str]
         include_to_api: typing.NotRequired[bool]
         description: typing.NotRequired[str | None]
         tags: typing.NotRequired[set[str] | None]
@@ -153,8 +153,8 @@ class microservice:
         if not callable(procedure):
             raise ValueError("decorated function must be callable")
 
-        label = kwargs.pop("label", procedure.__name__)
-        uri = self._make_uri(label)
+        path = kwargs.pop("path", procedure.__name__)
+        uri = self._make_uri(path)
 
         payload_model = kwargs.pop("payload_model", ...)
         return_model = kwargs.pop("return_model", ...)
