@@ -70,14 +70,14 @@ class client_iface(typing.Protocol):
 
 
 @_shared.dataclass(slots=True)
-class invoke_event_model[T: typing.Any]:
+class invoke_event_model:
     """
     Represents an invocation event.
     """
 
     id: str
     caller_id: str
-    payload: T
+    payload: typing.Any
     reply_topic: str
 
     @property
@@ -87,14 +87,14 @@ class invoke_event_model[T: typing.Any]:
 
 
 @_shared.dataclass(slots=True)
-class reply_event_model[T: typing.Any]:
+class reply_event_model:
     """
     Represents a reply event.
     """
 
     call_id: str
     is_error: bool
-    payload: T
+    payload: typing.Any
 
 
 class rpc_error(Exception):
@@ -195,11 +195,9 @@ class Almanet:
         self._leave_event = _shared.observable(self.task_pool)
         self._pending_replies: typing.MutableMapping[str, asyncio.Future[reply_event_model]] = {}
 
-    type _produce_args = tuple[str, typing.Any]
-
     async def _produce(
         self,
-        topic: str,
+        uri: str,
         payload: typing.Any,
     ) -> None:
         try:
@@ -209,20 +207,21 @@ class Almanet:
             raise e
 
         try:
-            logger.debug(f"trying to produce {topic} topic")
-            await self._client.produce(topic, message_body)
+            logger.debug(f"trying to produce {uri} topic")
+            await self._client.produce(uri, message_body)
         except Exception as e:
-            logger.exception(f"during produce {topic} topic")
+            logger.exception(f"during produce {uri} topic")
             raise e
 
     def produce(
         self,
-        *args: typing.Unpack[_produce_args],
+        uri: str,
+        payload: typing.Any,
     ) -> asyncio.Task[None]:
         """
         Produce a message with a specified topic and payload.
         """
-        return self.task_pool.schedule(self._produce(*args))
+        return self.task_pool.schedule(self._produce(uri, payload))
 
     async def _serialize[T: typing.Any](
         self,
@@ -240,7 +239,7 @@ class Almanet:
 
             yield message  # type: ignore
 
-    async def consume[T: typing.Any](
+    async def consume[T](
         self,
         topic: str,
         channel: str,
@@ -289,20 +288,19 @@ class Almanet:
             logger.debug("successful commit", extra=__log_extra)
         logger.debug("reply event consumer end")
 
-    type _call_args = tuple[typing.Union[str, "_microservice.abstract_procedure_model"], typing.Any]
-
-    class _call_kwargs[R: typing.Any](typing.TypedDict):
+    class _call_kwargs[R](typing.TypedDict):
         timeout: typing.NotRequired[int]
-        result_model: typing.NotRequired[R]
+        result_model: typing.NotRequired[type[R]]
 
-    async def _call[R: typing.Any](
+    async def _call[I, O](
         self,
-        topic: typing.Union[str, "_microservice.abstract_procedure_model"],
-        payload: typing.Any,
-        *,
-        timeout: int = 60,
-        result_model: R = ...,
-    ) -> tuple[R, reply_event_model]:
+        topic: typing.Union[str, "_microservice.abstract_procedure_model[I, O]"],
+        payload: I,
+        **kwargs: typing.Unpack[_call_kwargs[O]],
+    ) -> tuple[O, reply_event_model]:
+        result_model = kwargs.get("result_model", ...)
+        timeout = kwargs.get("timeout") or 60
+
         if isinstance(topic, str):
             uri = topic
         else:
@@ -310,10 +308,7 @@ class Almanet:
             if result_model is ...:
                 result_model = topic.return_model
 
-        if result_model is ...:
-            serialize_result = lambda x: x
-        else:
-            serialize_result = _shared.serialize(result_model)
+        serialize_result = _shared.serialize(result_model)
 
         invocation = invoke_event_model(
             id=_shared.new_id(),
@@ -354,29 +349,42 @@ class Almanet:
         finally:
             self._pending_replies.pop(invocation.id)
 
-    def call[R: typing.Any](
+    @typing.overload
+    def call[I, O](
         self,
-        *args: typing.Unpack[_call_args],
-        **kwargs: typing.Unpack[_call_kwargs[R]],
-    ) -> asyncio.Task[tuple[R, reply_event_model]]:
+        topic: "_microservice.abstract_procedure_model[I, O]",
+        payload: I,
+        **kwargs: typing.Unpack[_call_kwargs],
+    ) -> asyncio.Task[tuple[O, reply_event_model]]: ...
+
+    @typing.overload
+    def call[O](
+        self,
+        topic: str,
+        payload: typing.Any,
+        **kwargs: typing.Unpack[_call_kwargs[O]],
+    ) -> asyncio.Task[tuple[O, reply_event_model]]: ...
+
+    def call(self, *args, **kwargs):
         """
         Call a procedure with a specified topic and payload.
         Returns a reply event.
         """
         return self.task_pool.schedule(self._call(*args, **kwargs))
 
-    type _multicall_args = tuple[typing.Union[str, "_microservice.abstract_procedure_model"], typing.Any]
-
     class _multicall_kwargs(typing.TypedDict):
         timeout: typing.NotRequired[int]
+        # TODO
+        # result_model: typing.NotRequired[R]
 
-    async def _multicall(
+    async def _multicall[I, O](
         self,
-        topic: typing.Union[str, "_microservice.abstract_procedure_model"],
-        payload: typing.Any,
-        *,
-        timeout: int = 60,
+        topic: typing.Union[str, "_microservice.abstract_procedure_model[I, O]"],
+        payload: I,
+        **kwargs: typing.Unpack[_multicall_kwargs],
     ) -> list[reply_event_model]:
+        timeout = kwargs.get("timeout") or 60
+
         uri = topic if isinstance(topic, str) else topic.uri
 
         invocation = invoke_event_model(
@@ -411,11 +419,23 @@ class Almanet:
 
         return result
 
-    async def multicall(
+    @typing.overload
+    def multicall[I, O](
         self,
-        *args: typing.Unpack[_multicall_args],
+        topic: "_microservice.abstract_procedure_model[I, O]",
+        payload: I,
         **kwargs: typing.Unpack[_multicall_kwargs],
-    ) -> asyncio.Task[list[reply_event_model]]:
+    ) -> asyncio.Task[list[reply_event_model]]: ...
+
+    @typing.overload
+    def multicall(
+        self,
+        topic: str,
+        payload: typing.Any,
+        **kwargs: typing.Unpack[_multicall_kwargs],
+    ) -> asyncio.Task[list[reply_event_model]]: ...
+
+    def multicall(self, *args, **kwargs):
         """
         Call simultaneously multiple procedures with a specified topic and payload.
         Returns a list of reply events.

@@ -10,8 +10,11 @@ __all__ = [
 
 
 def serialize[T: typing.Any](
-    annotation: type[T],
+    annotation: type[T] | typing.Any = ...,
 ) -> typing.Callable[[typing.Any], T]:
+    if annotation is ...:
+        return lambda v: v
+
     model = pydantic.TypeAdapter(annotation)
     return lambda v: model.validate_python(v)
 

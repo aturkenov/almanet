@@ -22,13 +22,8 @@ def validate_execution(
     - return_model: the model of the output
     """
     payload_model, return_model = _schema.extract_annotations(function, payload_model, return_model)
-
-    def dont_validate(v):
-        return v
-
-    payload_validator = dont_validate if payload_model is ... else _decoding.serialize(payload_model)
-
-    return_validator = dont_validate if return_model is ... else _decoding.serialize(return_model)
+    payload_validator = _decoding.serialize(payload_model)
+    return_validator = _decoding.serialize(return_model)
 
     @functools.wraps(function)
     async def decorator(payload, *args, **kwargs):

@@ -10,9 +10,9 @@ __all__ = [
 
 
 @_shared.dataclass
-class abstract_procedure_model:
+class abstract_procedure_model[I, O]:
     microservice: "microservice"
-    procedure: typing.Callable
+    procedure: typing.Callable[[I], typing.Awaitable[O]]
     label: str = ...
     include_to_api: bool = True
     description: str | None = None
@@ -37,7 +37,7 @@ class abstract_procedure_model:
     def uri(self):
         return self.microservice._make_uri(self.label)
 
-    def implements[F: typing.Callable](
+    def implements[F: typing.Callable[..., typing.Awaitable]](
         self,
         real_function: F,
     ) -> F:
@@ -192,23 +192,25 @@ class microservice:
             return lambda function: self.register_procedure(function, **kwargs)  # type: ignore
         return self.register_procedure(function, **kwargs)
 
-    @typing.overload
-    def abstract_procedure(
-        self,
-        **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ) -> typing.Callable[[typing.Callable], abstract_procedure_model]: ...
+    type _abstract_function[I, O] = typing.Callable[[I], typing.Awaitable[O]]
 
     @typing.overload
-    def abstract_procedure(
+    def abstract_procedure[I, O](
         self,
-        function: typing.Callable,
-    ) -> abstract_procedure_model: ...
+        **kwargs: typing.Unpack[_register_procedure_kwargs],
+    ) -> typing.Callable[[_abstract_function[I, O]], abstract_procedure_model[I, O]]: ...
+
+    @typing.overload
+    def abstract_procedure[I, O](
+        self,
+        function: _abstract_function[I, O],
+    ) -> abstract_procedure_model[I, O]: ...
 
     def abstract_procedure(
         self,
-        function: typing.Callable | None = None,
+        function: _abstract_function | None = None,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ) -> abstract_procedure_model | typing.Callable[..., abstract_procedure_model]:
+    ) -> abstract_procedure_model | typing.Callable[[_abstract_function], abstract_procedure_model]:
         if function is None:
             return lambda function: abstract_procedure_model(self, function, **kwargs)
         return abstract_procedure_model(self, function, **kwargs)
