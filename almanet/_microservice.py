@@ -14,6 +14,7 @@ class abstract_procedure_model[I, O]:
     microservice: "microservice"
     procedure: typing.Callable[[I], typing.Awaitable[O]]
     path: str = ...
+    channel: str | None = None
     include_to_api: bool = True
     description: str | None = None
     tags: set[str] | None = None
@@ -48,6 +49,7 @@ class abstract_procedure_model[I, O]:
         return self.microservice.register_procedure(
             real_function,
             path=self.path,
+            channel=self.channel,
             include_to_api=self.include_to_api,
             description=self.description,
             tags=self.tags,
@@ -138,6 +140,7 @@ class microservice:
 
     class _register_procedure_kwargs(typing.TypedDict):
         path: typing.NotRequired[str]
+        channel: typing.NotRequired[str | None]
         include_to_api: typing.NotRequired[bool]
         description: typing.NotRequired[str | None]
         tags: typing.NotRequired[set[str] | None]
@@ -161,7 +164,12 @@ class microservice:
         if kwargs.get("validate", True):
             procedure = _shared.validate_execution(procedure, payload_model, return_model)
 
-        registration = self.session.register(uri, procedure)
+        registration = self.session.register(
+            uri,
+            procedure,
+            channel=kwargs.get("channel"),
+        )
+        kwargs["channel"] = registration.channel
 
         if kwargs.get("include_to_api", True):
             procedure_schema = _shared.describe_function(
@@ -172,8 +180,7 @@ class microservice:
             )
             self._share_procedure_schema(
                 uri,
-                registration.channel,
-                **kwargs,
+                **kwargs,  # type: ignore
                 **procedure_schema,
             )
 
