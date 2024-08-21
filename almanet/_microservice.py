@@ -1,8 +1,10 @@
 import asyncio
 import typing
 
-from . import _almanet
 from . import _shared
+
+if typing.TYPE_CHECKING:
+    from . import _almanet
 
 __all__ = [
     "microservice",
@@ -75,13 +77,14 @@ class microservice:
 
     def __init__(
         self,
-        session: _almanet.Almanet,
+        session: "_almanet.Almanet",
         **kwargs: typing.Unpack[_kwargs],
     ):
         self._routes = set()
         self.pre = kwargs.get("prepath")
         self.tags = set(kwargs.get("tags") or [])
         self.session = session
+        self.session._post_join_event.add_observer(self._share_self_schema)
 
     def _share_self_schema(
         self,
@@ -134,9 +137,9 @@ class microservice:
 
     def _make_uri(
         self,
-        subtopic: str,
+        sub: str,
     ) -> str:
-        return f"{self.pre}.{subtopic}" if isinstance(self.pre, str) else subtopic
+        return f"{self.pre}.{sub}" if isinstance(self.pre, str) else sub
 
     class _register_procedure_kwargs(typing.TypedDict):
         path: typing.NotRequired[str]
@@ -152,7 +155,7 @@ class microservice:
         self,
         procedure: typing.Callable,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ) -> _almanet.registration_model:
+    ) -> "_almanet.registration_model":
         if not callable(procedure):
             raise ValueError("decorated function must be callable")
 
@@ -197,7 +200,7 @@ class microservice:
         """
         if function is None:
             return lambda function: self.register_procedure(function, **kwargs)  # type: ignore
-        return self.register_procedure(function, **kwargs)
+        return self.register_procedure(function, **kwargs)  # type: ignore
 
     type _abstract_function[I, O] = typing.Callable[[I], typing.Awaitable[O]]
 
@@ -226,8 +229,6 @@ class microservice:
         """
         Runs an event loop to serve the microservice.
         """
-        self.session._post_join_event.add_observer(self._share_self_schema)
-
         loop = asyncio.new_event_loop()
         loop.create_task(self.session.join())
         loop.run_forever()

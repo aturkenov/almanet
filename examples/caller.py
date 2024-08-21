@@ -10,7 +10,7 @@ async def main():
     # join to your nsq network.
     async with session:
         # calling the procedure by URI (Uniform Resource Identifier)
-        result, _ = await session.call("net.example.greeting", "Aidar")
+        result = await session.call("net.example.greeting", "Aidar")
 
         # invocation result
         print("result", result)

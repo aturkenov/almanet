@@ -288,27 +288,18 @@ class Almanet:
             logger.debug("successful commit", extra=__log_extra)
         logger.debug("reply event consumer end")
 
-    class _call_kwargs[R](typing.TypedDict):
+    type _call_only_args = tuple[str, typing.Any]
+
+    class _call_only_kwargs(typing.TypedDict):
         timeout: typing.NotRequired[int]
-        result_model: typing.NotRequired[type[R]]
 
-    async def _call[I, O](
+    async def _call_only(
         self,
-        topic: typing.Union[str, "_microservice.abstract_procedure_model[I, O]"],
-        payload: I,
-        **kwargs: typing.Unpack[_call_kwargs[O]],
-    ) -> tuple[O, reply_event_model]:
-        result_model = kwargs.get("result_model", ...)
+        *args: typing.Unpack[_call_only_args],
+        **kwargs: typing.Unpack[_call_only_kwargs],
+    ) -> reply_event_model:
+        uri, payload = args
         timeout = kwargs.get("timeout") or 60
-
-        if isinstance(topic, str):
-            uri = topic
-        else:
-            uri = topic.uri
-            if result_model is ...:
-                result_model = topic.return_model
-
-        serialize_result = _shared.serialize(result_model)
 
         invocation = invoke_event_model(
             id=_shared.new_id(),
@@ -337,17 +328,52 @@ class Almanet:
                         name=reply_event.payload["name"],
                     )
 
-                result = serialize_result(reply_event.payload)
-
-                return result, reply_event
-        except pydantic_core.ValidationError as e:
-            logger.error(f"invalid result from {uri}", extra={**__log_extra, "error": repr(e)})
-            raise e
+                return reply_event
         except Exception as e:
             logger.error(f"during call {uri}", extra={**__log_extra, "error": repr(e)})
             raise e
         finally:
             self._pending_replies.pop(invocation.id)
+
+    def call_only(
+        self,
+        *args: typing.Unpack[_call_only_args],
+        **kwargs: typing.Unpack[_call_only_kwargs],
+    ) -> asyncio.Task[reply_event_model]:
+        """
+        Executes the remote procedure using the payload.
+        """
+        return self.task_pool.schedule(self._call_only(*args, **kwargs))
+
+    class _call_kwargs[R](_call_only_kwargs):
+        result_model: typing.NotRequired[type[R]]
+
+    async def _call[I, O](
+        self,
+        topic: typing.Union[str, "_microservice.abstract_procedure_model[I, O]"],
+        payload: I,
+        **kwargs: typing.Unpack[_call_kwargs],
+    ) -> O:
+        result_model = kwargs.pop("result_model", ...)
+
+        if isinstance(topic, str):
+            uri = topic
+        else:
+            uri = topic.uri
+            if result_model is ...:
+                result_model = topic.return_model
+
+        serialize_result = _shared.serialize(result_model)
+
+        reply_event = await self._call_only(uri, payload, **kwargs)
+
+        try:
+            result = serialize_result(reply_event.payload)
+        except pydantic_core.ValidationError as e:
+            logger.error(f"invalid result from {uri}", extra={"error": repr(e)})
+            raise e
+
+        return result
 
     @typing.overload
     def call[I, O](
@@ -355,7 +381,7 @@ class Almanet:
         topic: "_microservice.abstract_procedure_model[I, O]",
         payload: I,
         **kwargs: typing.Unpack[_call_kwargs],
-    ) -> asyncio.Task[tuple[O, reply_event_model]]: ...
+    ) -> asyncio.Task[O]: ...
 
     @typing.overload
     def call[O](
@@ -363,29 +389,22 @@ class Almanet:
         topic: str,
         payload: typing.Any,
         **kwargs: typing.Unpack[_call_kwargs[O]],
-    ) -> asyncio.Task[tuple[O, reply_event_model]]: ...
+    ) -> asyncio.Task[O]: ...
 
     def call(self, *args, **kwargs):
         """
-        Call a procedure with a specified topic and payload.
-        Returns a reply event.
+        Executes the remote procedure using the payload.
+        Returns a instance of result model.
         """
         return self.task_pool.schedule(self._call(*args, **kwargs))
 
-    class _multicall_kwargs(typing.TypedDict):
-        timeout: typing.NotRequired[int]
-        # TODO
-        # result_model: typing.NotRequired[R]
-
-    async def _multicall[I, O](
+    async def _multicall_only(
         self,
-        topic: typing.Union[str, "_microservice.abstract_procedure_model[I, O]"],
-        payload: I,
-        **kwargs: typing.Unpack[_multicall_kwargs],
+        *args: typing.Unpack[_call_only_args],
+        **kwargs: typing.Unpack[_call_only_kwargs],
     ) -> list[reply_event_model]:
+        uri, payload = args
         timeout = kwargs.get("timeout") or 60
-
-        uri = topic if isinstance(topic, str) else topic.uri
 
         invocation = invoke_event_model(
             id=_shared.new_id(),
@@ -419,28 +438,15 @@ class Almanet:
 
         return result
 
-    @typing.overload
-    def multicall[I, O](
+    def multicall_only(
         self,
-        topic: "_microservice.abstract_procedure_model[I, O]",
-        payload: I,
-        **kwargs: typing.Unpack[_multicall_kwargs],
-    ) -> asyncio.Task[list[reply_event_model]]: ...
-
-    @typing.overload
-    def multicall(
-        self,
-        topic: str,
-        payload: typing.Any,
-        **kwargs: typing.Unpack[_multicall_kwargs],
-    ) -> asyncio.Task[list[reply_event_model]]: ...
-
-    def multicall(self, *args, **kwargs):
+        *args: typing.Unpack[_call_only_args],
+        **kwargs: typing.Unpack[_call_only_kwargs],
+    ) -> asyncio.Task[list[reply_event_model]]:
         """
-        Call simultaneously multiple procedures with a specified topic and payload.
-        Returns a list of reply events.
+        Execute simultaneously multiple procedures using the payload.
         """
-        return self.task_pool.schedule(self._multicall(*args, **kwargs))
+        return self.task_pool.schedule(self._multicall_only(*args, **kwargs))
 
     async def _consume_invocations(
         self,
@@ -547,9 +553,9 @@ class Almanet:
 
     async def __aexit__(
         self,
-        exception_type,
-        exception_value,
-        exception_traceback,
+        exception_type = None,
+        exception_value = None,
+        exception_traceback = None,
     ) -> None:
         if self.joined:
             await self.leave()
