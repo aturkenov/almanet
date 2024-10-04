@@ -27,7 +27,7 @@ class task_pool:
 
         Args:
         - coroutine: the coroutine to be scheduled as an asyncio task.
-        - daemon: if True, the task is marked as a daemon task.
+        - daemon: marks the task as a daemon and does not wait completion.
         """
         task = asyncio.create_task(coroutine)
         task.add_done_callback(lambda _: self._tasks.discard(task))

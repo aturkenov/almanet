@@ -1,13 +1,14 @@
 .vscode/
 .idea/
-
 .DS_Store
 
 __pycache__/
-
-*.log
-nsqd.dat
 dist/
+.pytest_cache/
+
 node_modules/
 build/
 .vite/
+
+*.log
+nsqd.dat

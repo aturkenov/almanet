@@ -1,49 +1,65 @@
 import asyncio
+from datetime import datetime
 from time import time
+
+import pytest
 
 import almanet
 
 
-class Denied(almanet.RPCError):
-    ...
+class denied(almanet.rpc_error): ...
 
 
-async def greeting(name: str, **kwargs) -> str:
-    if name == 'guest':
-        raise Denied()
-    return f'Hello, {name}!'
+async def greeting(payload: str, **kwargs) -> str:
+    if payload == "guest":
+        raise denied()
+    return f"Hello, {payload}!"
 
 
-async def test_rpc():
-    async def test_timeout(s):
-        try:
-            await almanet.call(s, 'net.example.does.not.exist', 'payload')
-        except Exception as e:
-            assert isinstance(e, asyncio.TimeoutError)
+async def now(*args, **kwargs) -> datetime:
+    return datetime.now()
 
-    async def test_happy_path(s):
-        result = await almanet.call(s, 'net.example.greeting', 'World')
-        assert result.payload == 'Hello, World!'
 
-        try:
-            await almanet.call(s, 'net.example.greeting', 'guest')
-        except Exception as e:
-            assert isinstance(e, almanet.RPCError)
-        else:
-            raise AssertionError('invalid behaviour')
+async def test_rpc(
+    n = 1000,
+):
+    session = almanet.new_session("localhost:4150")
 
-    async def stress_test(s):
+    session.register("net.example.greeting", greeting)
+    session.register("net.example.now", now)
+
+    async with session:
+        # happy path
+        result = await session.call("net.example.greeting", "Almanet")
+        assert result == "Hello, Almanet!"
+
+        # concurrent calls
+        await asyncio.gather(*[
+            session.call("net.example.greeting", payload="test"),
+            session.call("net.example.now", payload=None),
+        ])
+
+        # catching rpc exceptions
+        with pytest.raises(TimeoutError):
+            await session.call("net.example.not_exist", True, timeout=1)
+
+        # catching rpc exceptions
+        with pytest.raises(almanet.rpc_error):
+            await session.call("net.example.greeting", "guest")
+
+        # sequential calls - stress test
         begin_time = time()
-        async with asyncio.TaskGroup() as tg:
-            for i in range(1000):
-                coro = await almanet.call(s, 'net.example.greeting', 'World')
-                tg.create_task(coro)
+        for _ in range(n):
+            await session.call("net.example.now", payload=None)
         end_time = time()
-        duration = end_time - begin_time
-        assert duration > 1
+        test_duration = end_time - begin_time
+        assert test_duration < 1
 
-    __session = await almanet.join('localhost:4150')
-    await test_timeout(__session)
-    await almanet.register(__session, 'net.example.greeting', greeting)
-    await test_happy_path(__session)
-    await stress_test(__session)
+        # concurrent call - stress test
+        begin_time = time()
+        await asyncio.gather(*[
+            session.call("net.example.now", payload=None) for _ in range(n)
+        ])
+        end_time = time()
+        test_duration = end_time - begin_time
+        assert test_duration < 1

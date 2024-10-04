@@ -2,13 +2,14 @@ from uuid import uuid4, UUID
 import typing
 import almanet
 
-example_service = almanet.new_microservice("localhost:4150", prepath="net.order")
+service = almanet.new_service(__name__)
 
-state_any = almanet.observable_state(example_service, "ANY")
-state_initial = almanet.observable_state(example_service, "INITIAL")
-state_complete = almanet.observable_state(example_service, "COMPLETE")
+state_any = almanet.observable_state(service, "ANY")
+state_initial = almanet.observable_state(service, "INITIAL")
+state_complete = almanet.observable_state(service, "COMPLETE")
 
 
+@service.procedure
 @state_initial.transition_from(state_any)
 async def create(
     payload: str,
@@ -29,7 +30,3 @@ async def _complete(
     order_pk = context["pk"]
     username = context["username"]
     print(f"{order_pk}: {username} is complete")
-
-
-if __name__ == "__main__":
-    example_service.serve()
