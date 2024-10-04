@@ -188,7 +188,6 @@ class observable_state(_state):
             return self._add_observer(
                 sources=sources,
                 procedure=function,
-                register=False,
                 **extra,
             )
 
