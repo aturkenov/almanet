@@ -8,10 +8,10 @@ from almanet import _shared
 if typing.TYPE_CHECKING:
     from ansq.tcp.types import NSQMessage
 
-__all__ = ["ANSQClient"]
+__all__ = ["ansq_client"]
 
 
-class ANSQClient:
+class ansq_client:
 
     async def connect(
         self,
@@ -56,9 +56,9 @@ class ANSQClient:
             nsqd_tcp_addresses=self.addresses,
             topic=topic,
             channel=channel,
+            connection_options=ansq.ConnectionOptions()
         )
         messages_stream = reader.messages()
-        # ansq does not close stream automatically
-        messages_stream, close_stream = _shared.make_closable(messages_stream, reader.close)
         messages_stream = self._convert_ansq_message(messages_stream)
-        return messages_stream, close_stream
+        # ansq does not close stream automatically
+        return _shared.make_closable(messages_stream, reader.close)

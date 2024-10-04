@@ -7,20 +7,21 @@ import pydantic_core
 from . import _shared
 
 if typing.TYPE_CHECKING:
-    from . import _microservice
+    from . import _service
 
 __all__ = [
-    "Almanet",
     "client_iface",
     "invoke_event_model",
     "qmessage_model",
     "reply_event_model",
     "rpc_error",
+    "Almanet",
+    "new_session",
 ]
 
 
 logger = logging.getLogger("almanet")
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 
 @_shared.dataclass(slots=True)
@@ -175,25 +176,26 @@ class Almanet:
     def version(self) -> float:
         return 0
 
-    class _kwargs(typing.TypedDict):
-        id: typing.NotRequired[str]
-
     def __init__(
         self,
         *addresses: str,
-        client: client_iface,
-        **kwargs: typing.Unpack[_kwargs],
+        client_class: type[client_iface] | None = None,
     ) -> None:
         if not all(isinstance(i, str) for i in addresses):
             raise ValueError("addresses must be a iterable of strings")
-        self.id = kwargs.get("id") or _shared.new_id()
+        self.id = _shared.new_id()
         self.joined = False
-        self.addresses = addresses
-        self._client = client
+        self.addresses: typing.Sequence[str] = addresses
         self.task_pool = _shared.task_pool()
-        self._post_join_event = _shared.observable(self.task_pool)
-        self._leave_event = _shared.observable(self.task_pool)
+        if client_class is None:
+            from . import _clients
+
+            client_class = _clients.DEFAULT_CLIENT
+        self._client: client_iface = client_class()
+        self._post_join_event = _shared.observable()
+        self._leave_event = _shared.observable()
         self._pending_replies: typing.MutableMapping[str, asyncio.Future[reply_event_model]] = {}
+        self._invocations_switch = _shared.switch()
 
     async def _produce(
         self,
@@ -288,7 +290,7 @@ class Almanet:
             logger.debug("successful commit", extra=__log_extra)
         logger.debug("reply event consumer end")
 
-    type _call_only_args = tuple[str, typing.Any]
+    _call_only_args = tuple[str, typing.Any]
 
     class _call_only_kwargs(typing.TypedDict):
         timeout: typing.NotRequired[int]
@@ -350,7 +352,7 @@ class Almanet:
 
     async def _call[I, O](
         self,
-        topic: typing.Union[str, "_microservice.abstract_procedure_model[I, O]"],
+        topic: typing.Union[str, "_service.abstract_procedure_model[I, O]"],
         payload: I,
         **kwargs: typing.Unpack[_call_kwargs],
     ) -> O:
@@ -378,7 +380,7 @@ class Almanet:
     @typing.overload
     def call[I, O](
         self,
-        topic: "_microservice.abstract_procedure_model[I, O]",
+        topic: "_service.abstract_procedure_model[I, O]",
         payload: I,
         **kwargs: typing.Unpack[_call_kwargs],
     ) -> asyncio.Task[O]: ...
@@ -448,6 +450,29 @@ class Almanet:
         """
         return self.task_pool.schedule(self._multicall_only(*args, **kwargs))
 
+    async def _handle_invocation(
+        self,
+        registration: registration_model,
+        message: qmessage_model,
+    ):
+        __log_extra = {"registration": str(registration), "incoming_message": str(message)}
+        try:
+            invocation = invoke_event_model(**message.body)
+            __log_extra["invocation"] = str(invocation)
+            logger.debug("new invocation", extra=__log_extra)
+
+            if invocation.expired:
+                logger.warning("invocation expired", extra=__log_extra)
+            else:
+                reply = await registration.execute(invocation)
+                logger.debug("trying to reply", extra=__log_extra)
+                await self.produce(invocation.reply_topic, reply)
+        except:
+            logger.exception("during execute invocation", extra=__log_extra)
+        finally:
+            await message.commit()
+            logger.debug("successful commit", extra=__log_extra)
+
     async def _consume_invocations(
         self,
         registration: registration_model,
@@ -455,23 +480,8 @@ class Almanet:
         logger.debug(f"trying to register {registration.uri}/{registration.channel}")
         messages_stream, _ = await self.consume(f"_rpc_.{registration.uri}", registration.channel)
         async for message in messages_stream:
-            __log_extra = {"registration": str(registration), "incoming_message": str(message)}
-            try:
-                invocation = invoke_event_model(**message.body)
-                __log_extra["invocation"] = str(invocation)
-                logger.debug("new invocation", extra=__log_extra)
-
-                if invocation.expired:
-                    logger.warning("invocation expired", extra=__log_extra)
-                else:
-                    reply = await registration.execute(invocation)
-                    logger.debug("trying to reply", extra=__log_extra)
-                    await self.produce(invocation.reply_topic, reply)
-            except:
-                logger.exception("during execute invocation", extra=__log_extra)
-
-            await message.commit()
-            logger.debug("successful commit", extra=__log_extra)
+            self.task_pool.schedule(self._handle_invocation(registration, message))
+            await self._invocations_switch.access()
         logger.debug(f"consumer {registration.uri} down")
 
     def register(
@@ -492,7 +502,9 @@ class Almanet:
             session=self,
         )
 
-        self._post_join_event.add_observer(lambda: self._consume_invocations(r))
+        self._post_join_event.add_observer(
+            lambda: self.task_pool.schedule(self._consume_invocations(r), daemon=True),
+        )
 
         return r
 
@@ -502,6 +514,9 @@ class Almanet:
         """
         if self.joined:
             raise RuntimeError(f"session {self.id} already joined")
+
+        if len(self.addresses) == 0:
+            raise ValueError("addresses are not specified")
 
         logger.debug(f"trying to connect addresses={self.addresses}")
 
@@ -532,30 +547,35 @@ class Almanet:
         """
         if not self.joined:
             raise RuntimeError(f"session {self.id} not joined")
-
         self.joined = False
 
         logger.debug(f"trying to leave {self.id} session, reason: {reason}")
 
-        stop_consume_replies = self._leave_event.observers.pop(0)
-
-        self._leave_event.notify()
+        self._invocations_switch.off()
 
         logger.debug(f"session {self.id} await task pool complete")
         await self.task_pool.complete()
 
-        stop_consume_replies()
+        self._leave_event.notify()
+
+        self._invocations_switch.on()
 
         logger.debug(f"session {self.id} trying to close connection")
         await self._client.close()
+
+        # some tasks have not been completed yet
+        await asyncio.sleep(0.1)
 
         logger.warning(f"session {self.id} left")
 
     async def __aexit__(
         self,
-        exception_type = None,
-        exception_value = None,
-        exception_traceback = None,
+        exception_type=None,
+        exception_value=None,
+        exception_traceback=None,
     ) -> None:
         if self.joined:
             await self.leave()
+
+
+new_session = Almanet

@@ -5,4 +5,4 @@ __all__ = [
 ]
 
 
-DEFAULT_CLIENT = ANSQClient
+DEFAULT_CLIENT = ansq_client

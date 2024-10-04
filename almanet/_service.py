@@ -1,19 +1,21 @@
 import asyncio
+import signal
 import typing
 
+from . import _almanet
 from . import _shared
 
-if typing.TYPE_CHECKING:
-    from . import _almanet
-
 __all__ = [
-    "microservice",
+    "service_model",
+    "new_service",
+    "service_group_model",
+    "new_service_group",
 ]
 
 
 @_shared.dataclass
 class abstract_procedure_model[I, O]:
-    microservice: "microservice"
+    microservice: "service_model"
     procedure: typing.Callable[[I], typing.Awaitable[O]]
     path: str = ...
     channel: str | None = None
@@ -48,7 +50,7 @@ class abstract_procedure_model[I, O]:
             raise ValueError("procedure already implemented")
         self._has_implementation = True
 
-        return self.microservice.register_procedure(
+        self.microservice.register_procedure(
             real_function,
             path=self.path,
             channel=self.channel,
@@ -58,32 +60,23 @@ class abstract_procedure_model[I, O]:
             validate=self.validate,
             payload_model=self.payload_model,
             return_model=self.return_model,
-        )  # type: ignore
+        )
+
+        return real_function
 
 
-class microservice:
-    """
-    Represents a microservice that can be used to register procedures (functions) with a session.
-    """
-
-    class _kwargs(typing.TypedDict):
-        """
-        - prepath: is used to prepend a path to the procedure's topic.
-        - tags: are used to categorize the procedures.
-        """
-
-        prepath: typing.NotRequired[str]
-        tags: typing.NotRequired[typing.Set[str]]
+class service_model:
 
     def __init__(
         self,
-        session: "_almanet.Almanet",
-        **kwargs: typing.Unpack[_kwargs],
-    ):
-        self._routes = set()
-        self.pre = kwargs.get("prepath")
-        self.tags = set(kwargs.get("tags") or [])
-        self.session = session
+        prepath: str,
+        tags: set[str] | None = None,
+        session: _almanet.Almanet | None = None,
+    ) -> None:
+        self.pre: str = prepath
+        self.tags: set[str] = set(tags or [])
+        self._routes: set[str] = set()
+        self.session: _almanet.Almanet = session or _almanet.new_session()
         self.session._post_join_event.add_observer(self._share_self_schema)
 
     def _share_self_schema(
@@ -177,7 +170,7 @@ class microservice:
         if kwargs.get("include_to_api", True):
             procedure_schema = _shared.describe_function(
                 procedure,
-                kwargs.pop("description"),
+                kwargs.pop("description", None),
                 payload_model,
                 return_model,
             )
@@ -225,10 +218,54 @@ class microservice:
             return lambda function: abstract_procedure_model(self, function, **kwargs)
         return abstract_procedure_model(self, function, **kwargs)
 
+
+new_service = service_model
+
+
+class service_group_model:
+
+    def __init__(
+        self,
+        *addresses: str,
+    ) -> None:
+        self.addresses: typing.Sequence[str] = addresses
+        self.services: list[service_model] = []
+
+    def include(
+        self, 
+        s: service_model,
+    ) -> None:
+        if not isinstance(s, service_model):
+            raise ValueError("must be an instance of service")
+        self.services.append(s)
+
     def serve(self) -> None:
         """
-        Runs an event loop to serve the microservice.
+        Runs an event loop to serve the mounted services.
         """
+        async def begin() -> None:
+            async with asyncio.TaskGroup() as tg:
+                for i in self.services:
+                    i.session.addresses = self.addresses
+                    c = i.session.join()
+                    tg.create_task(c)
+
+        async def end() -> None:
+            async with asyncio.TaskGroup() as tg:
+                for i in self.services:
+                    c = i.session.leave()
+                    tg.create_task(c)
+
+            loop.stop()
+
         loop = asyncio.new_event_loop()
-        loop.create_task(self.session.join())
+
+        loop.create_task(begin())
+
+        for s in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(s, lambda: loop.create_task(end()))
+
         loop.run_forever()
+
+
+new_service_group = service_group_model

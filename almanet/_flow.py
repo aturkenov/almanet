@@ -2,11 +2,10 @@ import logging
 import re
 import typing
 
-from . import _microservice
 from . import _shared
 
 if typing.TYPE_CHECKING:
-    from . import _almanet
+    from . import _service
 
 __all__ = [
     "observable_state",
@@ -27,7 +26,6 @@ class transition:
     procedure: typing.Callable
     description: str | None = None
     priority: int = -1
-    registration: typing.Optional["_almanet.registration_model"] = None
 
     @property
     def __name__(self) -> str:
@@ -41,31 +39,25 @@ class transition:
     def is_observer(self) -> bool:
         return self.priority > -1
 
-    @property
-    def uri(self) -> str | None:
-        if self.registration is None:
-            raise AttributeError("`observer` has no attribute `uri`")
-        return self.registration.uri
-
     async def __call__(
         self,
-        *args,
-        context: typing.MutableMapping | None = None,
-        **kwargs,
+        payload: typing.Any = ...,
+        /,
+        context: typing.Any = ...,
     ):
-        if context is None:
-            context = {}
-        result = await self.procedure(*args, **kwargs, context=context, transition=self)
+        if context is ...:
+            context = {"payload": payload}
+        result = await self.procedure(payload, context=context, transition=self)
         self.target.notify(context)
         return result
 
 
-_state_label_re = re.compile("[A-Za-z_]+")
+_state_label_re = re.compile("[A-Za-z0-9_]+")
 
 
 @_shared.dataclass(slots=True)
 class _state:
-    service: _microservice.microservice
+    service: "_service.service_model"
     label: str
     description: str | None = None
     _transitions: typing.List[transition] = ...
@@ -81,7 +73,6 @@ class _state:
         procedure: typing.Callable,
         label: str | None = None,
         description: str | None = None,
-        register: bool = True,
         **extra,
     ):
         if not callable(procedure):
@@ -104,16 +95,6 @@ class _state:
             procedure=procedure,
             **extra,
         )
-
-        if register:
-            payload_model, return_model = _shared.extract_annotations(procedure)
-            instance.registration = self.service.register_procedure(
-                instance.__call__,
-                path=label,
-                description=description,
-                payload_model=payload_model,
-                return_model=return_model,
-            )
 
         for i in sources:
             i._transitions.append(instance)
