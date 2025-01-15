@@ -213,21 +213,22 @@ class service:
         self,
         session_pool: "_session_pool.session_pool",
     ) -> None:
-        with session_pool as session:
-            self.session = session
-            self._share_self_schema()
+        self.session = session_pool.rotate()
 
-            for registration in self.procedures:
+        self._share_self_schema()
+
+        for registration in self.procedures:
+            for session in session_pool.sessions:
                 session.register(
                     registration.uri,
                     registration.procedure,
                     channel=self.channel,
                 )
 
-                if registration.include_to_api:
-                    self._share_procedure_schema(
-                        registration,
-                    )
+            if registration.include_to_api:
+                self._share_procedure_schema(
+                    registration,
+                )
 
 
 new_service = service

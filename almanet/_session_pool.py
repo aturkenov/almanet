@@ -17,7 +17,7 @@ class session_pool:
         self.joined = False
         self.sessions: list[_almanet.Almanet] = []
 
-    async def join(
+    async def acquire(
         self,
         addresses: tuple[str, ...],
         number_of_sessions: int = 1,
@@ -29,7 +29,7 @@ class session_pool:
         self.joined = True
         return self
 
-    async def leave(
+    async def release(
         self,
         *args,
         **kwargs,
@@ -42,11 +42,6 @@ class session_pool:
         session = self.sessions.pop(0)
         self.sessions.append(session)
         return session
-
-    def __enter__(self) -> _almanet.Almanet:
-        return self.rotate()
-
-    def __exit__(self, etype, evalue, etraceback) -> None: ...
 
 
 new_session_pool = session_pool

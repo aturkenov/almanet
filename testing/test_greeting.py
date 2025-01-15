@@ -38,11 +38,11 @@ async def _test_greeting(
 
 @testing_service.post_join
 async def __post_join(session_pool: almanet.session_pool):
-    with session_pool as session:
-        await session.call(
-            _test_greeting,
-            None,
-        )
+    session = session_pool.rotate()
+    await session.call(
+        _test_greeting,
+        None,
+    )
 
 
 async def test_microservice():
