@@ -174,6 +174,7 @@ class service:
         async def procedure(*args, **kwargs):
             return {
                 "session_id": self.session.id,
+                "session_version": self.session.version,
                 "routes": list(self.routes),
                 **extra,
             }
@@ -195,6 +196,7 @@ class service:
         async def procedure(*args, **kwargs):
             return {
                 "session_id": self.session.id,
+                "session_version": self.session.version,
                 "uri": registration.uri,
                 "validate": registration.validate,
                 "payload_model": registration.payload_model,

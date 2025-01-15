@@ -194,6 +194,10 @@ class Almanet:
         self._pending_replies: typing.MutableMapping[str, asyncio.Future[reply_event_model]] = {}
         self._invocations_switch = _shared.switch()
 
+    @property
+    def version(self) -> float:
+        return 0.1
+
     async def _produce(
         self,
         uri: str,
