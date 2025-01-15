@@ -1,10 +1,18 @@
 import asyncio
 import functools
 
+import pydantic_core
+
 from . import _decoding
 from . import _schema
 
-__all__ = ["validate_execution"]
+__all__ = [
+    "validate_execution",
+    "validation_error",
+]
+
+
+validation_error = pydantic_core.ValidationError
 
 
 def validate_execution(

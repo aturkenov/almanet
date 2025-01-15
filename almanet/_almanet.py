@@ -1,8 +1,5 @@
 import asyncio
-import logging
 import typing
-
-import pydantic_core
 
 from . import _shared
 
@@ -18,10 +15,6 @@ __all__ = [
     "Almanet",
     "new_session",
 ]
-
-
-logger = logging.getLogger("almanet")
-logger.setLevel(logging.INFO)
 
 
 @_shared.dataclass(slots=True)
@@ -144,27 +137,33 @@ class registration_model:
         self,
         invocation: invoke_event_model,
     ) -> reply_event_model:
-        __log_extra = {"registration": str(self), "invocation": str(invocation)}
-        try:
-            logger.debug("trying to execute procedure", extra=__log_extra)
-            reply_payload = await self.procedure(invocation.payload)
-            return reply_event_model(call_id=invocation.id, is_error=False, payload=reply_payload)
-        except Exception as e:
-            if isinstance(e, rpc_error):
-                error_name = e.name
-                error_message = e.args
-            elif isinstance(e, pydantic_core.ValidationError):
-                error_name = "ValidationError"
-                error_message = repr(e)
-            else:
-                error_name = "InternalError"
-                error_message = "oops"
-                logger.exception("during execute procedure", extra=__log_extra)
-            return reply_event_model(
-                call_id=invocation.id,
-                is_error=True,
-                payload={"name": error_name, "message": error_message},
-            )
+        with _shared.use_span(self.session._tracing_span):
+            with _shared.new_span(
+                f"execution {self.channel}/{self.uri}",
+                attributes={
+                    "registration": str(self),
+                    "invocation": str(invocation),
+                },
+            ) as span:
+                try:
+                    reply_payload = await self.procedure(invocation.payload)
+                    return reply_event_model(call_id=invocation.id, is_error=False, payload=reply_payload)
+                except Exception as e:
+                    span.record_exception(e)
+                    if isinstance(e, rpc_error):
+                        error_name = e.name
+                        error_message = e.args
+                    elif isinstance(e, _shared.validation_error):
+                        error_name = "ValidationError"
+                        error_message = repr(e)
+                    else:
+                        error_name = "InternalError"
+                        error_message = "oops"
+                    return reply_event_model(
+                        call_id=invocation.id,
+                        is_error=True,
+                        payload={"name": error_name, "message": error_message},
+                    )
 
 
 class Almanet:
@@ -202,18 +201,13 @@ class Almanet:
         uri: str,
         payload: typing.Any,
     ) -> None:
-        try:
+        with _shared.new_span(
+            "producing",
+            attributes={"uri": uri},
+        ) as span:
             message_body = _shared.dump(payload)
-        except Exception as e:
-            logger.error(f"during encode payload: {repr(e)}")
-            raise e
-
-        try:
-            logger.debug(f"trying to produce {uri} topic")
+            span.add_event("sending")
             await self._client.produce(uri, message_body)
-        except Exception as e:
-            logger.exception(f"during produce {uri} topic")
-            raise e
 
     def produce(
         self,
@@ -233,11 +227,12 @@ class Almanet:
         serializer = _shared.serialize_json(payload_model)
 
         async for message in messages_stream:
-            try:
-                message.body = serializer(message.body)
-            except:
-                logger.exception("during decode payload")
-                continue
+            with _shared.new_span("serialization") as span:
+                try:
+                    message.body = serializer(message.body)
+                except Exception as e:
+                    span.record_exception(e, {"message": str(message)})
+                    continue
 
             yield message  # type: ignore
 
@@ -252,43 +247,49 @@ class Almanet:
         Consume messages from a message broker with the specified topic and channel.
         It returns a tuple of a stream of messages and a function that can stop consumer.
         """
-        logger.debug(f"trying to consume {topic}/{channel}")
+        with _shared.new_span(
+            "consuming",
+            attributes={
+                "uri": topic,
+                "channel": channel,
+            },
+        ):
+            messages_stream, stop_consumer = await self._client.consume(topic, channel)
+            self._leave_event.add_observer(stop_consumer)
 
-        messages_stream, stop_consumer = await self._client.consume(topic, channel)
-        self._leave_event.add_observer(stop_consumer)
+            messages_stream = self._serialize(messages_stream, payload_model)
 
-        messages_stream = self._serialize(messages_stream, payload_model)
-
-        return messages_stream, stop_consumer
+            return messages_stream, stop_consumer
 
     async def _consume_replies(
         self,
         ready_event: asyncio.Event,
     ) -> None:
-        messages_stream, _ = await self.consume(
-            f"_rpc_._reply_.{self.id}",
-            channel="rpc-recipient",
-        )
-        logger.debug("reply event consumer begin")
-        ready_event.set()
-        async for message in messages_stream:
-            __log_extra = {"incoming_message": str(message)}
-            try:
-                reply = reply_event_model(**message.body)
-                __log_extra["reply"] = str(reply)
-                logger.debug("new reply", extra=__log_extra)
+        with _shared.new_span("replies consumer") as span:
+            messages_stream, _ = await self.consume(
+                f"_rpc_._reply_.{self.id}",
+                channel="rpc-recipient",
+            )
+            ready_event.set()
+
+            async for message in messages_stream:
+                span.add_event("new reply event", attributes={"message": str(message)})
+
+                try:
+                    reply = reply_event_model(**message.body)
+                except Exception as e:
+                    span.record_exception(e, {"incoming_message": str(message)})
 
                 pending = self._pending_replies.get(reply.call_id)
                 if pending is None:
-                    logger.warning("pending event not found", extra=__log_extra)
+                    span.record_exception(
+                        Exception("pending event not found"),
+                        {"incoming_message": str(message)}
+                    )
                 else:
                     pending.set_result(reply)
-            except:
-                logger.exception("during parse reply", extra=__log_extra)
 
-            await message.commit()
-            logger.debug("successful commit", extra=__log_extra)
-        logger.debug("reply event consumer end")
+                await message.commit()
 
     _call_only_args = tuple[str, typing.Any]
 
@@ -302,7 +303,6 @@ class Almanet:
     ) -> reply_event_model:
         uri, payload = args
         timeout = kwargs.get("timeout") or 60
-
         invocation = invoke_event_model(
             id=_shared.new_id(),
             caller_id=self.id,
@@ -310,32 +310,32 @@ class Almanet:
             reply_topic=f"_rpc_._reply_.{self.id}",
         )
 
-        __log_extra = {"uri": uri, "timeout": timeout, "invoke_event": str(invocation)}
-        logger.debug("trying to call", extra=__log_extra)
+        with _shared.new_span(
+            "only calling",
+            attributes={
+                "uri": uri,
+                "timeout": timeout,
+                "invoke_event": str(invocation),
+            },
+        ) as span:
+            pending_reply_event = asyncio.Future[reply_event_model]()
+            self._pending_replies[invocation.id] = pending_reply_event
 
-        pending_reply_event = asyncio.Future[reply_event_model]()
-        self._pending_replies[invocation.id] = pending_reply_event
+            try:
+                async with asyncio.timeout(timeout):
+                    await self.produce(f"_rpc_.{uri}", invocation)
 
-        try:
-            async with asyncio.timeout(timeout):
-                await self.produce(f"_rpc_.{uri}", invocation)
+                    reply_event = await pending_reply_event
+                    span.add_event("reply", attributes={"reply_event": str(reply_event)})
 
-                reply_event = await pending_reply_event
-                __log_extra["reply_event"] = str(reply_event)
-                logger.debug("new reply event", extra=__log_extra)
-
-                if reply_event.is_error:
-                    raise rpc_error(
-                        reply_event.payload["message"],
-                        name=reply_event.payload["name"],
-                    )
-
-                return reply_event
-        except Exception as e:
-            logger.error(f"during call {uri}", extra={**__log_extra, "error": repr(e)})
-            raise e
-        finally:
-            self._pending_replies.pop(invocation.id)
+                    if reply_event.is_error:
+                        raise rpc_error(
+                            reply_event.payload["message"],
+                            name=reply_event.payload["name"],
+                        )
+                    return reply_event
+            finally:
+                self._pending_replies.pop(invocation.id)
 
     def call_only(
         self,
@@ -365,17 +365,17 @@ class Almanet:
             if result_model is ...:
                 result_model = topic.return_model
 
-        serialize_result = _shared.serialize(result_model)
-
-        reply_event = await self._call_only(uri, payload, **kwargs)
-
-        try:
+        with _shared.new_span(
+            "calling",
+            attributes={
+                "uri": uri,
+                "result_model": str(result_model),
+            },
+        ):
+            serialize_result = _shared.serialize(result_model)
+            reply_event = await self._call_only(uri, payload, **kwargs)
             result = serialize_result(reply_event.payload)
-        except pydantic_core.ValidationError as e:
-            logger.error(f"invalid result from {uri}", extra={"error": repr(e)})
-            raise e
-
-        return result
+            return result
 
     @typing.overload
     def call[I, O](
@@ -415,30 +415,39 @@ class Almanet:
             reply_topic=f"_rpc_._replies_.{self.id}",
         )
 
-        __log_extra = {"uri": uri, "timeout": timeout, "invoke_event": str(invocation)}
+        with _shared.new_span(
+            "only multicalling",
+            attributes={
+                "uri": uri,
+                "timeout": timeout,
+                "invoke_event": str(invocation),
+            },
+        ) as span:
+            messages_stream, stop_consumer = await self.consume(
+                invocation.reply_topic,
+                "rpc-recipient",
+            )
 
-        messages_stream, stop_consumer = await self.consume(invocation.reply_topic, "rpc-recipient")
+            result = []
+            try:
+                async with asyncio.timeout(timeout):
+                    await self.produce(f"_rpc_.{uri}", invocation)
 
-        result = []
-        try:
-            async with asyncio.timeout(timeout):
-                await self.produce(f"_rpc_.{uri}", invocation)
+                    async for message in messages_stream:
+                        try:
+                            span.add_event("new reply event", attributes={"message": str(message)})
+                            reply = reply_event_model(**message.body)
+                            result.append(reply)
+                        except Exception as e:
+                            span.record_exception(e)
 
-                async for message in messages_stream:
-                    try:
-                        logger.debug("new reply event", extra=__log_extra)
-                        reply = reply_event_model(**message.body)
-                        result.append(reply)
-                    except:
-                        logger.exception("during parse reply event", extra=__log_extra)
+                        await message.commit()
+            except TimeoutError:
+                stop_consumer()
 
-                    await message.commit()
-        except TimeoutError:
-            stop_consumer()
+            span.add_event("done")
 
-        logger.debug(f"multicall {uri} done")
-
-        return result
+            return result
 
     def multicall_only(
         self,
@@ -455,34 +464,41 @@ class Almanet:
         registration: registration_model,
         message: qmessage_model,
     ):
-        __log_extra = {"registration": str(registration), "incoming_message": str(message)}
-        try:
-            invocation = invoke_event_model(**message.body)
-            __log_extra["invocation"] = str(invocation)
-            logger.debug("new invocation", extra=__log_extra)
+        with _shared.new_span(
+            "_handle_invocation",
+            attributes={
+                "registration": str(registration),
+                "incoming_message": str(message),
+            },
+        ) as span:
+            try:
+                invocation = invoke_event_model(**message.body)
+                span.add_event("new invocation", {"invocation": str(invocation)})
 
-            if invocation.expired:
-                logger.warning("invocation expired", extra=__log_extra)
-            else:
-                reply = await registration.execute(invocation)
-                logger.debug("trying to reply", extra=__log_extra)
-                await self.produce(invocation.reply_topic, reply)
-        except:
-            logger.exception("during execute invocation", extra=__log_extra)
-        finally:
-            await message.commit()
-            logger.debug("successful commit", extra=__log_extra)
+                if invocation.expired:
+                    span.add_event("invocation expired")
+                else:
+                    reply = await registration.execute(invocation)
+                    span.add_event("replying", {"reply_event": str(reply)})
+                    await self.produce(invocation.reply_topic, reply)
+            finally:
+                await message.commit()
 
     async def _consume_invocations(
         self,
         registration: registration_model,
     ) -> None:
-        logger.debug(f"trying to register {registration.uri}/{registration.channel}")
-        messages_stream, _ = await self.consume(f"_rpc_.{registration.uri}", registration.channel)
-        async for message in messages_stream:
-            self.task_pool.schedule(self._handle_invocation(registration, message))
-            await self._invocations_switch.access()
-        logger.debug(f"consumer {registration.uri} down")
+        with _shared.new_span(
+            "_consume_invocations",
+            attributes={"registration": str(registration)},
+        ):
+            messages_stream, _ = await self.consume(
+                f"_rpc_.{registration.uri}",
+                registration.channel,
+            )
+            async for message in messages_stream:
+                self.task_pool.schedule(self._handle_invocation(registration, message))
+                await self._invocations_switch.access()
 
     def register(
         self,
@@ -495,43 +511,55 @@ class Almanet:
         Register a procedure with a specified topic and payload.
         Returns the created registration.
         """
-        r = registration_model(
-            uri=topic,
-            channel=channel or "RPC",
-            procedure=procedure,
-            session=self,
-        )
+        with _shared.new_span("registration") as span:
+            r = registration_model(
+                uri=topic,
+                channel=channel or "RPC",
+                procedure=procedure,
+                session=self,
+            )
+            span.set_attribute("registration", str(r))
 
-        self._post_join_event.add_observer(
-            lambda: self.task_pool.schedule(self._consume_invocations(r), daemon=True),
-        )
+            self._post_join_event.add_observer(
+                lambda: self.task_pool.schedule(self._consume_invocations(r), daemon=True),
+            )
 
-        return r
+            return r
 
     async def join(self) -> None:
         """
         Join the session to message broker.
         """
-        if self.joined:
-            raise RuntimeError(f"session {self.id} already joined")
+        with _shared.new_span(
+            "session",
+            attributes={
+                "id": self.id,
+                "addresses": self.addresses,
+            },
+            end_on_exit=False,
+        ) as span:
+            self._tracing_span = span
 
-        if len(self.addresses) == 0:
-            raise ValueError("addresses are not specified")
+            if self.joined:
+                raise RuntimeError(f"session {self.id} already joined")
 
-        logger.debug(f"trying to connect addresses={self.addresses}")
+            if len(self.addresses) == 0:
+                raise ValueError("addresses are not specified")
 
-        await self._client.connect(self.addresses)
+            await self._client.connect(self.addresses)
 
-        consume_replies_ready = asyncio.Event()
-        self.task_pool.schedule(
-            self._consume_replies(consume_replies_ready),
-            daemon=True,
-        )
-        await consume_replies_ready.wait()
+            span.add_event("schedule replies consumer")
+            consume_replies_ready = asyncio.Event()
+            self.task_pool.schedule(
+                self._consume_replies(consume_replies_ready),
+                daemon=True,
+            )
+            await consume_replies_ready.wait()
 
-        self.joined = True
-        self._post_join_event.notify()
-        logger.info(f"session {self.id} joined")
+            self.joined = True
+
+            span.add_event("notify post join event observers")
+            self._post_join_event.notify()
 
     async def __aenter__(self) -> "Almanet":
         if not self.joined:
@@ -540,33 +568,38 @@ class Almanet:
 
     async def leave(
         self,
-        reason: str | None = None,
+        reason: str = '-',
     ) -> None:
         """
         Leave the session from message broker.
         """
-        if not self.joined:
-            raise RuntimeError(f"session {self.id} not joined")
-        self.joined = False
+        with _shared.use_span(
+            self._tracing_span,
+            end_on_exit=True,
+        ) as span:
+            span.add_event("leaving", attributes={"reason": reason})            
 
-        logger.debug(f"trying to leave {self.id} session, reason: {reason}")
+            if not self.joined:
+                raise RuntimeError(f"session {self.id} not joined")
+            self.joined = False
 
-        self._invocations_switch.off()
+            span.add_event("disable receiving invocation events")
+            self._invocations_switch.off()
 
-        logger.debug(f"session {self.id} await task pool complete")
-        await self.task_pool.complete()
+            span.add_event("await task pool complete")
+            await self.task_pool.complete()
 
-        self._leave_event.notify()
+            span.add_event("notify leave event observers")
+            self._leave_event.notify()
 
-        self._invocations_switch.on()
+            span.add_event("enable receiving invocation events")
+            self._invocations_switch.on()
 
-        logger.debug(f"session {self.id} trying to close connection")
-        await self._client.close()
+            span.add_event("close connection")
+            await self._client.close()
 
-        # some tasks have not been completed yet
-        await asyncio.sleep(0.1)
-
-        logger.warning(f"session {self.id} left")
+            # some tasks have not been completed yet
+            await asyncio.sleep(0.1)
 
     async def __aexit__(
         self,

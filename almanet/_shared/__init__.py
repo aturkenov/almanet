@@ -7,6 +7,7 @@ from ._observable import *
 from ._schema import *
 from ._streaming import *
 from ._task_pool import *
+from ._tracing import *
 from ._switch import *
 from ._validate_execution import *
 from ._is_valid_uri import *
@@ -21,6 +22,7 @@ __all__ = [
     *_schema.__all__,
     *_streaming.__all__,
     *_task_pool.__all__,
+    *_tracing.__all__,
     *_switch.__all__,
     *_validate_execution.__all__,
     *_is_valid_uri.__all__,
