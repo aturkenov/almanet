@@ -1,5 +1,4 @@
 import asyncio
-import functools
 
 from . import _decoding
 from . import _schema
@@ -25,7 +24,6 @@ def validate_execution(
     payload_validator = _decoding.serialize(payload_model)
     return_validator = _decoding.serialize(return_model)
 
-    @functools.wraps(function)
     async def decorator(payload, *args, **kwargs):
         payload = payload_validator(payload)
         result = function(payload, *args, **kwargs)

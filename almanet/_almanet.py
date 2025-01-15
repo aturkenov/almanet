@@ -147,7 +147,10 @@ class registration_model:
         __log_extra = {"registration": str(self), "invocation": str(invocation)}
         try:
             logger.debug("trying to execute procedure", extra=__log_extra)
-            reply_payload = await self.procedure(invocation.payload)
+            reply_payload = await self.procedure(
+                session=self.session,
+                payload=invocation.payload,
+            )
             return reply_event_model(call_id=invocation.id, is_error=False, payload=reply_payload)
         except Exception as e:
             if isinstance(e, rpc_error):
@@ -172,26 +175,20 @@ class Almanet:
     Represents a session, connected to message broker.
     """
 
-    @property
-    def version(self) -> float:
-        return 0
-
     def __init__(
         self,
         *addresses: str,
         client_class: type[client_iface] | None = None,
     ) -> None:
-        if not all(isinstance(i, str) for i in addresses):
-            raise ValueError("addresses must be a iterable of strings")
         self.id = _shared.new_id()
+        self.addresses: tuple[str, ...] = addresses
         self.joined = False
-        self.addresses: typing.Sequence[str] = addresses
-        self.task_pool = _shared.task_pool()
         if client_class is None:
             from . import _clients
 
             client_class = _clients.DEFAULT_CLIENT
         self._client: client_iface = client_class()
+        self._task_pool = _shared.task_pool()
         self._post_join_event = _shared.observable()
         self._leave_event = _shared.observable()
         self._pending_replies: typing.MutableMapping[str, asyncio.Future[reply_event_model]] = {}
@@ -223,7 +220,7 @@ class Almanet:
         """
         Produce a message with a specified topic and payload.
         """
-        return self.task_pool.schedule(self._produce(uri, payload))
+        return self._task_pool.schedule(self._produce(uri, payload))
 
     async def _serialize[T: typing.Any](
         self,
@@ -345,7 +342,7 @@ class Almanet:
         """
         Executes the remote procedure using the payload.
         """
-        return self.task_pool.schedule(self._call_only(*args, **kwargs))
+        return self._task_pool.schedule(self._call_only(*args, **kwargs))
 
     class _call_kwargs[R](_call_only_kwargs):
         result_model: typing.NotRequired[type[R]]
@@ -398,7 +395,7 @@ class Almanet:
         Executes the remote procedure using the payload.
         Returns a instance of result model.
         """
-        return self.task_pool.schedule(self._call(*args, **kwargs))
+        return self._task_pool.schedule(self._call(*args, **kwargs))
 
     async def _multicall_only(
         self,
@@ -448,7 +445,7 @@ class Almanet:
         """
         Execute simultaneously multiple procedures using the payload.
         """
-        return self.task_pool.schedule(self._multicall_only(*args, **kwargs))
+        return self._task_pool.schedule(self._multicall_only(*args, **kwargs))
 
     async def _handle_invocation(
         self,
@@ -480,7 +477,7 @@ class Almanet:
         logger.debug(f"trying to register {registration.uri}/{registration.channel}")
         messages_stream, _ = await self.consume(f"_rpc_.{registration.uri}", registration.channel)
         async for message in messages_stream:
-            self.task_pool.schedule(self._handle_invocation(registration, message))
+            self._task_pool.schedule(self._handle_invocation(registration, message))
             await self._invocations_switch.access()
         logger.debug(f"consumer {registration.uri} down")
 
@@ -489,41 +486,50 @@ class Almanet:
         topic: str,
         procedure: typing.Callable,
         *,
-        channel: str | None = None,
+        channel: str = "main",
     ) -> registration_model:
         """
         Register a procedure with a specified topic and payload.
         Returns the created registration.
         """
-        r = registration_model(
+        if not self.joined:
+            raise RuntimeError(f"session {self.id} not joined")
+
+        registration = registration_model(
             uri=topic,
-            channel=channel or "RPC",
+            channel=channel,
             procedure=procedure,
             session=self,
         )
 
-        self._post_join_event.add_observer(
-            lambda: self.task_pool.schedule(self._consume_invocations(r), daemon=True),
-        )
+        self._task_pool.schedule(self._consume_invocations(registration), daemon=True)
 
-        return r
+        return registration
 
-    async def join(self) -> None:
+    async def join(
+        self,
+        *addresses: str,
+    ) -> "Almanet":
         """
         Join the session to message broker.
         """
         if self.joined:
             raise RuntimeError(f"session {self.id} already joined")
 
+        self.addresses += addresses
+
         if len(self.addresses) == 0:
-            raise ValueError("addresses are not specified")
+            raise ValueError("at least one address must be specified")
+
+        if not all(isinstance(i, str) for i in self.addresses):
+            raise ValueError("addresses must be a iterable of strings")
 
         logger.debug(f"trying to connect addresses={self.addresses}")
 
         await self._client.connect(self.addresses)
 
         consume_replies_ready = asyncio.Event()
-        self.task_pool.schedule(
+        self._task_pool.schedule(
             self._consume_replies(consume_replies_ready),
             daemon=True,
         )
@@ -533,9 +539,11 @@ class Almanet:
         self._post_join_event.notify()
         logger.info(f"session {self.id} joined")
 
+        return self
+
     async def __aenter__(self) -> "Almanet":
         if not self.joined:
-            await self.join()
+            return await self.join(*self.addresses)
         return self
 
     async def leave(
@@ -554,7 +562,7 @@ class Almanet:
         self._invocations_switch.off()
 
         logger.debug(f"session {self.id} await task pool complete")
-        await self.task_pool.complete()
+        await self._task_pool.complete()
 
         self._leave_event.notify()
 
@@ -568,12 +576,7 @@ class Almanet:
 
         logger.warning(f"session {self.id} left")
 
-    async def __aexit__(
-        self,
-        exception_type=None,
-        exception_value=None,
-        exception_traceback=None,
-    ) -> None:
+    async def __aexit__(self, etype, evalue, etraceback) -> None:
         if self.joined:
             await self.leave()
 
