@@ -1,46 +1,56 @@
-import asyncio
-import signal
 import typing
 
-from . import _almanet
 from . import _shared
 
+if typing.TYPE_CHECKING:
+    from . import _session_pool
+
 __all__ = [
-    "service_model",
+    "service",
     "new_service",
-    "service_group_model",
-    "new_service_group",
 ]
 
 
 @_shared.dataclass
 class abstract_procedure_model[I, O]:
-    microservice: "service_model"
+    service: "service"
     procedure: typing.Callable[[I], typing.Awaitable[O]]
     path: str = ...
-    channel: str | None = None
     include_to_api: bool = True
-    description: str | None = None
-    tags: set[str] | None = None
+    description: str = None
+    tags: set[str] = ...
     validate: bool = True
     payload_model: typing.Any = ...
     return_model: typing.Any = ...
     _has_implementation: bool = False
+    _schema: typing.Mapping = ...
 
     def __post_init__(self):
         if not callable(self.procedure):
             raise ValueError("decorated function must be callable")
         if not isinstance(self.path, str):
             self.path = self.procedure.__name__
-        if not isinstance(self.description, str):
-            self.description = self.procedure.__doc__
         self.payload_model, self.return_model = _shared.extract_annotations(
             self.procedure, self.payload_model, self.return_model
         )
+        self._schema = _shared.describe_function(
+            self.procedure,
+            self.description,
+            payload_annotation=self.payload_model,
+            return_annotation=self.return_model,
+        )
+        self.description = self._schema["description"]
+        if self.validate:
+            self.procedure = _shared.validate_execution(self.procedure, self.payload_model, self.return_model)
+        if self.tags is ...:
+            self.tags = set()
 
     @property
     def uri(self):
-        return self.microservice._make_uri(self.path)
+        return '.'.join([self.service.pre, self.path])
+
+    def __call__(self, *args, **kwargs):
+        return self.procedure(*args, **kwargs)
 
     def implements[F: typing.Callable[..., typing.Awaitable]](
         self,
@@ -50,10 +60,9 @@ class abstract_procedure_model[I, O]:
             raise ValueError("procedure already implemented")
         self._has_implementation = True
 
-        self.microservice.register_procedure(
+        self.service.add_procedure(
             real_function,
             path=self.path,
-            channel=self.channel,
             include_to_api=self.include_to_api,
             description=self.description,
             tags=self.tags,
@@ -65,122 +74,64 @@ class abstract_procedure_model[I, O]:
         return real_function
 
 
-class service_model:
-
+class service:
     def __init__(
         self,
-        prepath: str,
+        prepath: str = '',
         tags: set[str] | None = None,
-        session: _almanet.Almanet | None = None,
     ) -> None:
+        self.channel = "service"
         self.pre: str = prepath
-        self.tags: set[str] = set(tags or [])
-        self._routes: set[str] = set()
-        self.session: _almanet.Almanet = session or _almanet.new_session()
-        self.session._post_join_event.add_observer(self._share_self_schema)
+        self.default_tags: set[str] = set(tags or [])
+        self.procedures: list[abstract_procedure_model] = []
+        self.task_pool = _shared.task_pool()
+        self._post_join_event = _shared.observable()
+        self._post_join_event.add_observer(self._share_all)
 
-    def _share_self_schema(
+    @property
+    def routes(self) -> set[str]:
+        return {f"{i.uri}:{self.channel}" for i in self.procedures}
+
+    def post_join[T: typing.Callable](
         self,
-        **extra,
-    ) -> None:
-        async def procedure(*args, **kwargs):
-            return {
-                "client": self.session.id,
-                "version": self.session.version,
-                "routes": list(self._routes),
-                **extra,
-            }
-
-        self.session.register(
-            "_api_schema_.client",
-            procedure,
-            channel=self.session.id,
+        function: T,
+    ) -> T:
+        self._post_join_event.add_observer(
+            lambda *args, **kwargs: self.task_pool.schedule(function(*args, **kwargs))
         )
-
-    def _share_procedure_schema(
-        self,
-        uri: str,
-        channel: str,
-        tags: set[str] | None = None,
-        **extra,
-    ) -> None:
-        if tags is None:
-            tags = set()
-        tags |= self.tags
-        if len(tags) == 0:
-            tags = {"Default"}
-
-        async def procedure(*args, **kwargs):
-            return {
-                "client": self.session.id,
-                "version": self.session.version,
-                "uri": uri,
-                "channel": channel,
-                "tags": tags,
-                **extra,
-            }
-
-        self.session.register(
-            f"_api_schema_.{uri}.{channel}",
-            procedure,
-            channel=channel,
-        )
-
-        self._routes.add(f"{uri}/{channel}")
-
-    def _make_uri(
-        self,
-        sub: str,
-    ) -> str:
-        return f"{self.pre}.{sub}" if isinstance(self.pre, str) else sub
+        return function
 
     class _register_procedure_kwargs(typing.TypedDict):
         path: typing.NotRequired[str]
-        channel: typing.NotRequired[str | None]
         include_to_api: typing.NotRequired[bool]
-        description: typing.NotRequired[str | None]
-        tags: typing.NotRequired[set[str] | None]
+        description: typing.NotRequired[str]
+        tags: typing.NotRequired[set[str]]
         validate: typing.NotRequired[bool]
         payload_model: typing.NotRequired[typing.Any]
         return_model: typing.NotRequired[typing.Any]
 
-    def register_procedure(
+    def add_procedure(
         self,
-        procedure: typing.Callable,
+        function: typing.Callable,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ) -> "_almanet.registration_model":
-        if not callable(procedure):
-            raise ValueError("decorated function must be callable")
+    ) -> abstract_procedure_model:
+        procedure = abstract_procedure_model(self, function, **kwargs)
+        self.procedures.append(procedure)
+        return procedure
 
-        path = kwargs.pop("path", procedure.__name__)
-        uri = self._make_uri(path)
+    type _function[I, O] = typing.Callable[[I], typing.Awaitable[O]]
 
-        payload_model = kwargs.pop("payload_model", ...)
-        return_model = kwargs.pop("return_model", ...)
-        if kwargs.get("validate", True):
-            procedure = _shared.validate_execution(procedure, payload_model, return_model)
+    @typing.overload
+    def procedure[I, O](
+        self,
+        **kwargs: typing.Unpack[_register_procedure_kwargs],
+    ) -> typing.Callable[[_function[I, O]], abstract_procedure_model[I, O]]: ...
 
-        registration = self.session.register(
-            uri,
-            procedure,
-            channel=kwargs.get("channel"),
-        )
-        kwargs["channel"] = registration.channel
-
-        if kwargs.get("include_to_api", True):
-            procedure_schema = _shared.describe_function(
-                procedure,
-                kwargs.pop("description", None),
-                payload_model,
-                return_model,
-            )
-            self._share_procedure_schema(
-                uri,
-                **kwargs,  # type: ignore
-                **procedure_schema,
-            )
-
-        return registration
+    @typing.overload
+    def procedure[I, O](
+        self,
+        function: _function[I, O],
+    ) -> abstract_procedure_model[I, O]: ...
 
     def procedure[F: typing.Callable](
         self,
@@ -192,80 +143,91 @@ class service_model:
         Returns a decorated function.
         """
         if function is None:
-            return lambda function: self.register_procedure(function, **kwargs)  # type: ignore
-        return self.register_procedure(function, **kwargs)  # type: ignore
-
-    type _abstract_function[I, O] = typing.Callable[[I], typing.Awaitable[O]]
+            return lambda function: self.add_procedure(function, **kwargs)  # type: ignore
+        return self.add_procedure(function, **kwargs)  # type: ignore
 
     @typing.overload
     def abstract_procedure[I, O](
         self,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ) -> typing.Callable[[_abstract_function[I, O]], abstract_procedure_model[I, O]]: ...
+    ) -> typing.Callable[[_function[I, O]], abstract_procedure_model[I, O]]: ...
 
     @typing.overload
     def abstract_procedure[I, O](
         self,
-        function: _abstract_function[I, O],
+        function: _function[I, O],
     ) -> abstract_procedure_model[I, O]: ...
 
     def abstract_procedure(
         self,
-        function: _abstract_function | None = None,
+        function: _function | None = None,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ) -> abstract_procedure_model | typing.Callable[[_abstract_function], abstract_procedure_model]:
+    ) -> abstract_procedure_model | typing.Callable[[_function], abstract_procedure_model]:
         if function is None:
             return lambda function: abstract_procedure_model(self, function, **kwargs)
         return abstract_procedure_model(self, function, **kwargs)
 
-
-new_service = service_model
-
-
-class service_group_model:
-
-    def __init__(
+    def _share_self_schema(
         self,
-        *addresses: str,
+        **extra,
     ) -> None:
-        self.addresses: typing.Sequence[str] = addresses
-        self.services: list[service_model] = []
+        async def procedure(*args, **kwargs):
+            return {
+                "session_id": self.session.id,
+                "routes": list(self.routes),
+                **extra,
+            }
 
-    def include(
-        self, 
-        s: service_model,
+        self.session.register(
+            "_api_schema_.client",
+            procedure,
+            channel=self.session.id,
+        )
+
+    def _share_procedure_schema(
+        self,
+        registration: abstract_procedure_model,
     ) -> None:
-        if not isinstance(s, service_model):
-            raise ValueError("must be an instance of service")
-        self.services.append(s)
+        tags = registration.tags | self.default_tags
+        if len(tags) == 0:
+            tags = {"Default"}
 
-    def serve(self) -> None:
-        """
-        Runs an event loop to serve the mounted services.
-        """
-        async def begin() -> None:
-            async with asyncio.TaskGroup() as tg:
-                for i in self.services:
-                    i.session.addresses = self.addresses
-                    c = i.session.join()
-                    tg.create_task(c)
+        async def procedure(*args, **kwargs):
+            return {
+                "session_id": self.session.id,
+                "uri": registration.uri,
+                "validate": registration.validate,
+                "payload_model": registration.payload_model,
+                "return_model": registration.return_model,
+                "tags": tags,
+                **registration._schema,
+            }
 
-        async def end() -> None:
-            async with asyncio.TaskGroup() as tg:
-                for i in self.services:
-                    c = i.session.leave()
-                    tg.create_task(c)
+        self.session.register(
+            f"_api_schema_.{registration.uri}.{self.channel}",
+            procedure,
+            channel=self.channel,
+        )
 
-            loop.stop()
+    def _share_all(
+        self,
+        session_pool: "_session_pool.session_pool",
+    ) -> None:
+        with session_pool as session:
+            self.session = session
+            self._share_self_schema()
 
-        loop = asyncio.new_event_loop()
+            for registration in self.procedures:
+                session.register(
+                    registration.uri,
+                    registration.procedure,
+                    channel=self.channel,
+                )
 
-        loop.create_task(begin())
-
-        for s in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(s, lambda: loop.create_task(end()))
-
-        loop.run_forever()
+                if registration.include_to_api:
+                    self._share_procedure_schema(
+                        registration,
+                    )
 
 
-new_service_group = service_group_model
+new_service = service
