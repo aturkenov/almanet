@@ -8,9 +8,6 @@ __all__ = [
 
 
 class session_pool:
-    @property
-    def version(self) -> float:
-        return 0.1
 
     def __init__(self):
         self.id = _shared.new_id()
