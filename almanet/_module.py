@@ -18,16 +18,16 @@ def serve(
     session_pool = _session_pool.new_session_pool()
 
     async def begin() -> None:
-        await session_pool.join(addresses, len(services))
+        await session_pool.acquire(addresses, len(services))
         for service in services:
             service._post_join_event.notify(session_pool)
 
     async def end() -> None:
-        await session_pool.leave()
+        await session_pool.release()
         loop.stop()
 
     try:
-        loop = asyncio.get_running_loop()        
+        loop = asyncio.get_running_loop()
     except:
         loop = asyncio.new_event_loop()
 
