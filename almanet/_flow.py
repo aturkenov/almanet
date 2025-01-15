@@ -57,7 +57,7 @@ _state_label_re = re.compile("[A-Za-z0-9_]+")
 
 @_shared.dataclass(slots=True)
 class _state:
-    service: "_service.service_model"
+    service: "_service.service"
     label: str
     description: str | None = None
     _transitions: typing.List[transition] = ...
@@ -151,8 +151,7 @@ class observable_state(_state):
 
     def __post_init__(self):
         super(observable_state, self).__post_init__()
-        # TODO: better to consume
-        self.service.register_procedure(
+        self.service.add_procedure(
             self.next,
             path=self.label,
             include_to_api=False,
@@ -163,7 +162,8 @@ class observable_state(_state):
         self,
         context,
     ):
-        self.service.session.call(self.service._make_uri(self.label), context)
+        next_uri = ".".join([self.service.pre, self.label])
+        self.service.session_pool.call(next_uri, context)
 
     def _add_observer(
         self,

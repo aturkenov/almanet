@@ -51,6 +51,10 @@ reportAssignmentType = "warning"
 reportUnsupportedDunderAll = "none"
 
 [tool.pytest.ini_options]
+log_cli = "true"
+log_cli_level = "INFO"
+log_file = "pytest.log"
+log_file_level = "DEBUG"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 pythonpath = "./"

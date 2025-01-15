@@ -25,19 +25,19 @@ async def test_rpc(
 ):
     session = almanet.new_session("localhost:4150")
 
-    session.register("net.example.greeting", greeting)
-    session.register("net.example.now", now)
-
     async with session:
+        session.register("net.example.greeting", greeting)
+        session.register("net.example.now", now)
+
         # happy path
         result = await session.call("net.example.greeting", "Almanet")
         assert result == "Hello, Almanet!"
 
         # concurrent calls
-        await asyncio.gather(*[
+        await asyncio.gather(
             session.call("net.example.greeting", payload="test"),
             session.call("net.example.now", payload=None),
-        ])
+        )
 
         # catching rpc exceptions
         with pytest.raises(TimeoutError):
@@ -57,9 +57,9 @@ async def test_rpc(
 
         # concurrent call - stress test
         begin_time = time()
-        await asyncio.gather(*[
-            session.call("net.example.now", payload=None) for _ in range(n)
-        ])
+        await asyncio.gather(
+            *[session.call("net.example.now", payload=None) for _ in range(n)]
+        )
         end_time = time()
         test_duration = end_time - begin_time
         assert test_duration < 1
