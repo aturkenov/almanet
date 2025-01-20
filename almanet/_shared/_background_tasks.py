@@ -1,10 +1,10 @@
 import asyncio
 import typing
 
-__all__ = ["task_pool"]
+__all__ = ["background_tasks"]
 
 
-class task_pool:
+class background_tasks:
     """
     `asyncio.create_task` documentation has important note
     about avoiding a task disappearing mid-execution

@@ -188,7 +188,7 @@ class Almanet:
 
             client_class = _clients.DEFAULT_CLIENT
         self._client: client_iface = client_class()
-        self._task_pool = _shared.task_pool()
+        self._background_tasks = _shared.background_tasks()
         self._post_join_event = _shared.observable()
         self._leave_event = _shared.observable()
         self._pending_replies: typing.MutableMapping[str, asyncio.Future[reply_event_model]] = {}
@@ -224,7 +224,7 @@ class Almanet:
         """
         Produce a message with a specified topic and payload.
         """
-        return self._task_pool.schedule(self._produce(uri, payload))
+        return self._background_tasks.schedule(self._produce(uri, payload))
 
     async def _serialize[T: typing.Any](
         self,
@@ -346,7 +346,7 @@ class Almanet:
         """
         Executes the remote procedure using the payload.
         """
-        return self._task_pool.schedule(self._call_only(*args, **kwargs))
+        return self._background_tasks.schedule(self._call_only(*args, **kwargs))
 
     class _call_kwargs[R](_call_only_kwargs):
         result_model: typing.NotRequired[type[R]]
@@ -399,7 +399,7 @@ class Almanet:
         Executes the remote procedure using the payload.
         Returns a instance of result model.
         """
-        return self._task_pool.schedule(self._call(*args, **kwargs))
+        return self._background_tasks.schedule(self._call(*args, **kwargs))
 
     async def _multicall_only(
         self,
@@ -449,7 +449,7 @@ class Almanet:
         """
         Execute simultaneously multiple procedures using the payload.
         """
-        return self._task_pool.schedule(self._multicall_only(*args, **kwargs))
+        return self._background_tasks.schedule(self._multicall_only(*args, **kwargs))
 
     async def _handle_invocation(
         self,
@@ -481,7 +481,7 @@ class Almanet:
         logger.debug(f"trying to register {registration.uri}/{registration.channel}")
         messages_stream, _ = await self.consume(f"_rpc_.{registration.uri}", registration.channel)
         async for message in messages_stream:
-            self._task_pool.schedule(self._handle_invocation(registration, message))
+            self._background_tasks.schedule(self._handle_invocation(registration, message))
             await self._invocations_switch.access()
         logger.debug(f"consumer {registration.uri} down")
 
@@ -506,7 +506,7 @@ class Almanet:
             session=self,
         )
 
-        self._task_pool.schedule(self._consume_invocations(registration), daemon=True)
+        self._background_tasks.schedule(self._consume_invocations(registration), daemon=True)
 
         return registration
 
@@ -533,7 +533,7 @@ class Almanet:
         await self._client.connect(self.addresses)
 
         consume_replies_ready = asyncio.Event()
-        self._task_pool.schedule(
+        self._background_tasks.schedule(
             self._consume_replies(consume_replies_ready),
             daemon=True,
         )
@@ -566,7 +566,7 @@ class Almanet:
         self._invocations_switch.off()
 
         logger.debug(f"session {self.id} await task pool complete")
-        await self._task_pool.complete()
+        await self._background_tasks.complete()
 
         self._leave_event.notify()
 
