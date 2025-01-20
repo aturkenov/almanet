@@ -10,7 +10,10 @@ import almanet
 class denied(almanet.rpc_error): ...
 
 
-async def greeting(payload: str, **kwargs) -> str:
+async def greeting(
+    session, 
+    payload: str
+) -> str:
     if payload == "guest":
         raise denied()
     return f"Hello, {payload}!"
