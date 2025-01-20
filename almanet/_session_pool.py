@@ -1,4 +1,4 @@
-from . import _almanet
+from . import _session
 from . import _shared
 
 __all__ = [
@@ -12,7 +12,7 @@ class session_pool:
     def __init__(self):
         self.id = _shared.new_id()
         self.joined = False
-        self.sessions: list[_almanet.Almanet] = []
+        self.sessions: list[_session.Almanet] = []
 
     async def acquire(
         self,
@@ -20,7 +20,7 @@ class session_pool:
         number_of_sessions: int = 1,
     ) -> "session_pool":
         for _ in range(number_of_sessions):
-            session = _almanet.new_session()
+            session = _session.new_session()
             await session.join(*addresses)
             self.sessions.append(session)
         self.joined = True
@@ -35,7 +35,7 @@ class session_pool:
         for i in sessions:
             await i.leave(*args, **kwargs)
 
-    def rotate(self) -> _almanet.Almanet:
+    def rotate(self) -> _session.Almanet:
         session = self.sessions.pop(0)
         self.sessions.append(session)
         return session

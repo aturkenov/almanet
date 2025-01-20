@@ -148,8 +148,8 @@ class registration_model:
         try:
             logger.debug("trying to execute procedure", extra=__log_extra)
             reply_payload = await self.procedure(
-                session=self.session,
-                payload=invocation.payload,
+                self.session,
+                invocation.payload,
             )
             return reply_event_model(call_id=invocation.id, is_error=False, payload=reply_payload)
         except Exception as e:
@@ -353,7 +353,7 @@ class Almanet:
 
     async def _call[I, O](
         self,
-        topic: typing.Union[str, "_service.abstract_procedure_model[I, O]"],
+        topic: typing.Union[str, "_service.procedure_model[I, O]"],
         payload: I,
         **kwargs: typing.Unpack[_call_kwargs],
     ) -> O:
@@ -381,7 +381,7 @@ class Almanet:
     @typing.overload
     def call[I, O](
         self,
-        topic: "_service.abstract_procedure_model[I, O]",
+        topic: "_service.procedure_model[I, O]",
         payload: I,
         **kwargs: typing.Unpack[_call_kwargs],
     ) -> asyncio.Task[O]: ...
