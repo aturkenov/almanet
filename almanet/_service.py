@@ -88,7 +88,7 @@ class service:
         self.procedures: list[procedure_model] = []
         # only available after join
         self.session: "_session.Almanet"
-        self.task_pool = _shared.task_pool()
+        self.background_tasks = _shared.background_tasks()
         self._post_join_event = _shared.observable()
         self._post_join_event.add_observer(self._share_all)
 
@@ -107,7 +107,7 @@ class service:
         ):
             session = session_pool.rotate()
             coroutine = function(session, *args, **kwargs)
-            self.task_pool.schedule(coroutine)
+            self.background_tasks.schedule(coroutine)
 
         self._post_join_event.add_observer(decorator)
         return function
