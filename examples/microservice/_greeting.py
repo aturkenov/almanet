@@ -2,7 +2,8 @@ from . import greeting as public
 
 
 @public.greeting.implements
-async def greeting(
+async def _greeting(
+    session, 
     payload: str,  # is a data that was passed during invocation
 ) -> str:
     if payload == "guest":

@@ -3,6 +3,7 @@ import typing
 from . import _shared
 
 if typing.TYPE_CHECKING:
+    from . import _session
     from . import _session_pool
 
 __all__ = [
@@ -10,15 +11,17 @@ __all__ = [
     "new_service",
 ]
 
+type _function[*I, O] = typing.Callable[[*I], typing.Awaitable[O]]
+
 
 @_shared.dataclass
-class abstract_procedure_model[I, O]:
+class procedure_model[I, O]:
     service: "service"
-    procedure: typing.Callable[[I], typing.Awaitable[O]]
+    function: _function["_session.Almanet", I, O]
     path: str = ...
-    include_to_api: bool = True
     description: str = None
     tags: set[str] = ...
+    include_to_api: bool = True
     validate: bool = True
     payload_model: typing.Any = ...
     return_model: typing.Any = ...
@@ -26,22 +29,22 @@ class abstract_procedure_model[I, O]:
     _schema: typing.Mapping = ...
 
     def __post_init__(self):
-        if not callable(self.procedure):
+        if not callable(self.function):
             raise ValueError("decorated function must be callable")
         if not isinstance(self.path, str):
-            self.path = self.procedure.__name__
+            self.path = self.function.__name__
         self.payload_model, self.return_model = _shared.extract_annotations(
-            self.procedure, self.payload_model, self.return_model
+            self.function, self.payload_model, self.return_model
         )
         self._schema = _shared.describe_function(
-            self.procedure,
+            self.function,
             self.description,
             payload_annotation=self.payload_model,
             return_annotation=self.return_model,
         )
         self.description = self._schema["description"]
         if self.validate:
-            self.procedure = _shared.validate_execution(self.procedure, self.payload_model, self.return_model)
+            self.function = _shared.validate_execution(self.function, self.payload_model, self.return_model)
         if self.tags is ...:
             self.tags = set()
 
@@ -49,18 +52,18 @@ class abstract_procedure_model[I, O]:
     def uri(self):
         return '.'.join([self.service.pre, self.path])
 
-    def __call__(self, *args, **kwargs):
-        return self.procedure(*args, **kwargs)
+    def __call__(self, payload: I) -> typing.Awaitable[O]:
+        return self.function(self.service.session, payload)
 
-    def implements[F: typing.Callable[..., typing.Awaitable]](
+    def implements(
         self,
-        real_function: F,
-    ) -> F:
+        real_function: _function["_session.Almanet", I, O],
+    ) -> "procedure_model[I, O]":
         if self._has_implementation:
             raise ValueError("procedure already implemented")
         self._has_implementation = True
 
-        self.service.add_procedure(
+        procedure = self.service.add_procedure(
             real_function,
             path=self.path,
             include_to_api=self.include_to_api,
@@ -70,8 +73,7 @@ class abstract_procedure_model[I, O]:
             payload_model=self.payload_model,
             return_model=self.return_model,
         )
-
-        return real_function
+        return procedure
 
 
 class service:
@@ -83,7 +85,9 @@ class service:
         self.channel = "service"
         self.pre: str = prepath
         self.default_tags: set[str] = set(tags or [])
-        self.procedures: list[abstract_procedure_model] = []
+        self.procedures: list[procedure_model] = []
+        # only available after join
+        self.session: "_session.Almanet"
         self.task_pool = _shared.task_pool()
         self._post_join_event = _shared.observable()
         self._post_join_event.add_observer(self._share_all)
@@ -96,9 +100,16 @@ class service:
         self,
         function: T,
     ) -> T:
-        self._post_join_event.add_observer(
-            lambda *args, **kwargs: self.task_pool.schedule(function(*args, **kwargs))
-        )
+        def decorator(
+            session_pool: "_session_pool.session_pool",
+            *args,
+            **kwargs,
+        ):
+            session = session_pool.rotate()
+            coroutine = function(session, *args, **kwargs)
+            self.task_pool.schedule(coroutine)
+
+        self._post_join_event.add_observer(decorator)
         return function
 
     class _register_procedure_kwargs(typing.TypedDict):
@@ -110,62 +121,60 @@ class service:
         payload_model: typing.NotRequired[typing.Any]
         return_model: typing.NotRequired[typing.Any]
 
+    @typing.overload
+    def abstract_procedure[I, O](
+        self,
+        function: _function[I, O],
+    ) -> procedure_model[I, O]: ...
+
+    @typing.overload
+    def abstract_procedure[I, O](
+        self,
+        **kwargs: typing.Unpack[_register_procedure_kwargs],
+    ) -> typing.Callable[[_function[I, O]], procedure_model[I, O]]: ...
+
+    def abstract_procedure(
+        self,
+        function = None,
+        **kwargs: typing.Unpack[_register_procedure_kwargs],
+    ) -> procedure_model | typing.Callable[[_function], procedure_model]:
+        if function is None:
+            return lambda function: procedure_model(self, function, **kwargs)
+        return procedure_model(self, function, **kwargs)
+
     def add_procedure(
         self,
         function: typing.Callable,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ) -> abstract_procedure_model:
-        procedure = abstract_procedure_model(self, function, **kwargs)
+    ) -> procedure_model:
+        procedure = procedure_model(self, function, **kwargs)
         self.procedures.append(procedure)
         return procedure
 
-    type _function[I, O] = typing.Callable[[I], typing.Awaitable[O]]
-
     @typing.overload
     def procedure[I, O](
         self,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ) -> typing.Callable[[_function[I, O]], abstract_procedure_model[I, O]]: ...
+    ) -> typing.Callable[[_function["_session.Almanet", I, O]], procedure_model[I, O]]: ...
 
     @typing.overload
     def procedure[I, O](
         self,
-        function: _function[I, O],
-    ) -> abstract_procedure_model[I, O]: ...
+        function: _function["_session.Almanet", I, O],
+    ) -> procedure_model[I, O]: ...
 
-    def procedure[F: typing.Callable](
+    def procedure(
         self,
-        function: F | None = None,
+        function = None,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ) -> F:
+    ) -> procedure_model | typing.Callable[[_function], procedure_model]:
         """
         Allows you to easily add procedures (functions) to a microservice by using a decorator.
         Returns a decorated function.
         """
         if function is None:
-            return lambda function: self.add_procedure(function, **kwargs)  # type: ignore
-        return self.add_procedure(function, **kwargs)  # type: ignore
-
-    @typing.overload
-    def abstract_procedure[I, O](
-        self,
-        **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ) -> typing.Callable[[_function[I, O]], abstract_procedure_model[I, O]]: ...
-
-    @typing.overload
-    def abstract_procedure[I, O](
-        self,
-        function: _function[I, O],
-    ) -> abstract_procedure_model[I, O]: ...
-
-    def abstract_procedure(
-        self,
-        function: _function | None = None,
-        **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ) -> abstract_procedure_model | typing.Callable[[_function], abstract_procedure_model]:
-        if function is None:
-            return lambda function: abstract_procedure_model(self, function, **kwargs)
-        return abstract_procedure_model(self, function, **kwargs)
+            return lambda function: self.add_procedure(function, **kwargs)
+        return self.add_procedure(function, **kwargs)
 
     def _share_self_schema(
         self,
@@ -180,14 +189,14 @@ class service:
             }
 
         self.session.register(
-            "_api_schema_.client",
+            "_schema_.client",
             procedure,
             channel=self.session.id,
         )
 
     def _share_procedure_schema(
         self,
-        registration: abstract_procedure_model,
+        registration: procedure_model,
     ) -> None:
         tags = registration.tags | self.default_tags
         if len(tags) == 0:
@@ -206,7 +215,7 @@ class service:
             }
 
         self.session.register(
-            f"_api_schema_.{registration.uri}.{self.channel}",
+            f"_schema_.{registration.uri}.{self.channel}",
             procedure,
             channel=self.channel,
         )
@@ -223,7 +232,7 @@ class service:
             for session in session_pool.sessions:
                 session.register(
                     registration.uri,
-                    registration.procedure,
+                    registration.function,
                     channel=self.channel,
                 )
 

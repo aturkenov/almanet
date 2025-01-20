@@ -5,6 +5,7 @@ import typing
 from . import _shared
 
 if typing.TYPE_CHECKING:
+    from . import _session
     from . import _service
 
 __all__ = [
@@ -133,6 +134,7 @@ class observable_state(_state):
 
     async def next(
         self,
+        session: "_session.Almanet",
         context,
     ) -> typing.Any:
         _logger.debug(f"{self.label} begin")
@@ -163,7 +165,7 @@ class observable_state(_state):
         context,
     ):
         next_uri = ".".join([self.service.pre, self.label])
-        self.service.session_pool.call(next_uri, context)
+        self.service.session.call(next_uri, context)
 
     def _add_observer(
         self,

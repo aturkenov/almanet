@@ -9,16 +9,16 @@ testing_service = almanet.service("net.testing.microservice")
 
 @testing_service.procedure
 async def greeting(
-    payload: str,
     session: almanet.Almanet,
+    payload: str,
 ) -> str:
     return f"Hello, {payload}!"
 
 
 @testing_service.procedure
 async def _test_greeting(
-    payload,
     session: almanet.Almanet,
+    payload = None,
 ):
     payload = "Almanet"
     expected_result = "Hello, Almanet!"
@@ -37,8 +37,7 @@ async def _test_greeting(
 
 
 @testing_service.post_join
-async def __post_join(session_pool: almanet.session_pool):
-    session = session_pool.rotate()
+async def __post_join(session: almanet.Almanet):
     await session.call(
         _test_greeting,
         None,
@@ -50,4 +49,4 @@ async def test_microservice():
         "localhost:4150",
         services=[testing_service],
     )
-    await asyncio.sleep(5)
+    await asyncio.sleep(1)
