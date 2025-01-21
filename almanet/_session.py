@@ -149,7 +149,7 @@ class registration_model:
             logger.debug("trying to execute procedure", extra=__log_extra)
             reply_payload = await self.procedure(
                 self.session,
-                invocation.payload,
+                payload=invocation.payload,
             )
             return reply_event_model(call_id=invocation.id, is_error=False, payload=reply_payload)
         except Exception as e:

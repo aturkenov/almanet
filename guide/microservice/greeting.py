@@ -1,5 +1,10 @@
 import almanet
 
+__all__ = [
+    "access_denied",
+    "greet",
+]
+
 service = almanet.new_service(__name__)
 
 
@@ -8,7 +13,7 @@ class access_denied(almanet.rpc_error):
 
 
 @service.abstract_procedure
-async def greeting(payload: str) -> str:
+async def greet(payload: str) -> str:
     """
     Procedure that returns greeting message.
 
