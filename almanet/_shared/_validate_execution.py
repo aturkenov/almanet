@@ -24,9 +24,9 @@ def validate_execution(
     payload_validator = _decoding.serialize(payload_model)
     return_validator = _decoding.serialize(return_model)
 
-    async def decorator(payload, *args, **kwargs):
+    async def decorator(*args, payload, **kwargs):
         payload = payload_validator(payload)
-        result = function(payload, *args, **kwargs)
+        result = function(*args, **kwargs, payload=payload)
         if asyncio.iscoroutine(result):
             result = await result
         return return_validator(result)

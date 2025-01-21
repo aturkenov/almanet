@@ -8,7 +8,7 @@ testing_service = almanet.service("net.testing.microservice")
 
 
 @testing_service.procedure
-async def greeting(
+async def greet(
     session: almanet.Almanet,
     payload: str,
 ) -> str:
@@ -16,7 +16,7 @@ async def greeting(
 
 
 @testing_service.procedure
-async def _test_greeting(
+async def _test_greet(
     session: almanet.Almanet,
     payload = None,
 ):
@@ -24,22 +24,22 @@ async def _test_greeting(
     expected_result = "Hello, Almanet!"
 
     # call by URI
-    result = await session.call("net.testing.microservice.greeting", payload)
+    result = await session.call("net.testing.microservice.greet", payload)
     assert result == expected_result
 
     # call by procedure
-    result = await session.call(greeting, payload)
+    result = await session.call(greet, payload)
     assert result == expected_result
 
     # catch validation error
     with pytest.raises(almanet.rpc_error):
-        await session.call(greeting, .123)
+        await session.call(greet, .123)
 
 
 @testing_service.post_join
 async def __post_join(session: almanet.Almanet):
     await session.call(
-        _test_greeting,
+        _test_greet,
         None,
     )
 

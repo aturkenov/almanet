@@ -10,7 +10,7 @@ import almanet
 class denied(almanet.rpc_error): ...
 
 
-async def greeting(
+async def greet(
     session, 
     payload: str
 ) -> str:
@@ -29,16 +29,16 @@ async def test_rpc(
     session = almanet.new_session("localhost:4150")
 
     async with session:
-        session.register("net.example.greeting", greeting)
+        session.register("net.example.greet", greet)
         session.register("net.example.now", now)
 
         # happy path
-        result = await session.call("net.example.greeting", "Almanet")
+        result = await session.call("net.example.greet", "Almanet")
         assert result == "Hello, Almanet!"
 
         # concurrent calls
         await asyncio.gather(
-            session.call("net.example.greeting", payload="test"),
+            session.call("net.example.greet", payload="test"),
             session.call("net.example.now", payload=None),
         )
 
@@ -48,7 +48,7 @@ async def test_rpc(
 
         # catching rpc exceptions
         with pytest.raises(almanet.rpc_error):
-            await session.call("net.example.greeting", "guest")
+            await session.call("net.example.greet", "guest")
 
         # sequential calls - stress test
         begin_time = time()
