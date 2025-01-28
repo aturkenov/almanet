@@ -51,6 +51,8 @@ Use `almanet.new_service` function to create a new service.
 Then declare the `greet` function that accepts and returns a string as payload,
 then decorate it with the `@service.abstract_procedure` decorator.
 
+Defined payload and return type annotations are used to validate the input and output of the `greet` function.
+
 **Public Module**: Anyone can import and use this file, so it is important to keep the interface clean and straightforward.
 
 ### 2. Implementation File (`_greeting.py`)
