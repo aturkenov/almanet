@@ -11,8 +11,8 @@ class denied(almanet.rpc_error): ...
 
 
 async def greet(
-    session, 
-    payload: str
+    payload: str,
+    **kwargs,
 ) -> str:
     if payload == "guest":
         raise denied()
