@@ -66,8 +66,8 @@ from . import greeting as public
 
 @public.greet.implements
 async def _greet(
-    session, 
     payload: str,  # is a data that was passed during invocation
+    session,
 ) -> str:
     if payload == "guest":
         # you can raise custom exceptions

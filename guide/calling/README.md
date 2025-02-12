@@ -24,9 +24,10 @@ import asyncio
 import almanet
 
 async def main():
-    async with almanet.new_session("localhost:4150") as session:  # Connect to your network
+    session = almanet.new_session("localhost:4150")
+    async with session:  # Connect to your network
         try:
-            result = await session.call(guide.microservice.greet, "Aidar")  # Call the greeting procedure
+            result = await guide.microservice.greet("Aidar")  # Call the greeting procedure
             print(f"Result: {result}")  # Print the Result: 'Hello, Aidar'
         except almanet.rpc_error as e:
             print(f"Error calling procedure: {e}")

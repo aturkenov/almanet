@@ -24,11 +24,13 @@ def validate_execution(
     payload_validator = _decoding.serialize(payload_model)
     return_validator = _decoding.serialize(return_model)
 
-    async def decorator(*args, payload, **kwargs):
+    async def decorator(payload, *args, **kwargs):
+        # FIXME reraise custom validation error
         payload = payload_validator(payload)
-        result = function(*args, **kwargs, payload=payload)
+        result = function(payload, *args, **kwargs)
         if asyncio.iscoroutine(result):
             result = await result
+        # FIXME reraise custom validation error
         return return_validator(result)
 
     return decorator

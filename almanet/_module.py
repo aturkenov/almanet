@@ -18,18 +18,15 @@ def serve(
     session_pool = _session_pool.new_session_pool()
 
     async def begin() -> None:
-        await session_pool.acquire(addresses, len(services))
-        for service in services:
-            service._post_join_event.notify(session_pool)
+        await session_pool.spawn(addresses, len(services))
+        for s in services:
+            s._post_join_event.notify(session_pool)
 
     async def end() -> None:
-        await session_pool.release()
+        await session_pool.kill()
         loop.stop()
 
-    try:
-        loop = asyncio.get_running_loop()
-    except:
-        loop = asyncio.new_event_loop()
+    loop = asyncio.get_event_loop()
 
     for s in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(s, lambda: loop.create_task(end()))
