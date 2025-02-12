@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 
+from ._concurrent_context import *
 from ._decoding import *
 from ._encoding import *
 from ._new_id import *
@@ -14,6 +15,7 @@ from ._is_valid_uri import *
 __all__ = [
     "dataclass",
     "field",
+    *_concurrent_context.__all__,
     *_decoding.__all__,
     *_encoding.__all__,
     *_new_id.__all__,

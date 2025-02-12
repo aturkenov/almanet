@@ -133,13 +133,6 @@ class registration_model:
     def __name__(self):
         return self.uri
 
-    @property
-    def __doc__(self):
-        return self.procedure.__doc__
-
-    def __call__(self, *args, **kwargs):
-        return self.procedure(*args, **kwargs)
-
     async def execute(
         self,
         invocation: invoke_event_model,
@@ -148,8 +141,8 @@ class registration_model:
         try:
             logger.debug("trying to execute procedure", extra=__log_extra)
             reply_payload = await self.procedure(
-                self.session,
-                payload=invocation.payload,
+                invocation.payload,
+                session=self.session,
             )
             return reply_event_model(call_id=invocation.id, is_error=False, payload=reply_payload)
         except Exception as e:
@@ -513,7 +506,7 @@ class Almanet:
     async def join(
         self,
         *addresses: str,
-    ) -> "Almanet":
+    ) -> None:
         """
         Join the session to message broker.
         """
@@ -543,11 +536,12 @@ class Almanet:
         self._post_join_event.notify()
         logger.info(f"session {self.id} joined")
 
-        return self
-
     async def __aenter__(self) -> "Almanet":
         if not self.joined:
-            return await self.join(*self.addresses)
+            await self.join(*self.addresses)
+
+        _current_session.set(self)
+
         return self
 
     async def leave(
@@ -581,8 +575,20 @@ class Almanet:
         logger.warning(f"session {self.id} left")
 
     async def __aexit__(self, etype, evalue, etraceback) -> None:
+        _current_session.set(None)
+
         if self.joined:
             await self.leave()
 
 
 new_session = Almanet
+
+
+_current_session = _shared.new_concurrent_context()
+
+
+def get_current_session() -> Almanet:
+    session = _current_session.get(None)
+    if session is None:
+        raise RuntimeError("active session not found")
+    return session

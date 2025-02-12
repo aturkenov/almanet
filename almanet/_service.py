@@ -1,10 +1,10 @@
 import typing
 
 from . import _shared
+from . import _session_pool
 
 if typing.TYPE_CHECKING:
     from . import _session
-    from . import _session_pool
 
 __all__ = [
     "service",
@@ -17,9 +17,9 @@ type _function[*I, O] = typing.Callable[[*I], typing.Awaitable[O]]
 @_shared.dataclass
 class procedure_model[I, O]:
     service: "service"
-    function: _function["_session.Almanet", I, O]
+    function: _function[I, "_session.Almanet", O]
     path: str = ...
-    description: str = None
+    description: str | None = None
     tags: set[str] = ...
     include_to_api: bool = True
     validate: bool = True
@@ -53,11 +53,16 @@ class procedure_model[I, O]:
         return '.'.join([self.service.pre, self.path])
 
     def __call__(self, payload: I) -> typing.Awaitable[O]:
-        return self.function(self.service.session, payload)
+        session = _session_pool.acquire_active_session()
+
+        if self._has_implementation:
+            return self.function(payload, session=session)
+
+        return session.call(self.uri, payload)
 
     def implements(
         self,
-        real_function: _function["_session.Almanet", I, O],
+        real_function: _function[I, "_session.Almanet", O],
     ) -> "procedure_model[I, O]":
         if self._has_implementation:
             raise ValueError("procedure already implemented")
@@ -86,8 +91,6 @@ class service:
         self.pre: str = prepath
         self.default_tags: set[str] = set(tags or [])
         self.procedures: list[procedure_model] = []
-        # only available after join
-        self.session: "_session.Almanet"
         self.background_tasks = _shared.background_tasks()
         self._post_join_event = _shared.observable()
         self._post_join_event.add_observer(self._share_all)
@@ -115,7 +118,7 @@ class service:
     class _register_procedure_kwargs(typing.TypedDict):
         path: typing.NotRequired[str]
         include_to_api: typing.NotRequired[bool]
-        description: typing.NotRequired[str]
+        description: typing.NotRequired[str | None]
         tags: typing.NotRequired[set[str]]
         validate: typing.NotRequired[bool]
         payload_model: typing.NotRequired[typing.Any]
@@ -147,7 +150,12 @@ class service:
         function: typing.Callable,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
     ) -> procedure_model:
-        procedure = procedure_model(self, function, **kwargs)
+        procedure = procedure_model(
+            self,
+            function,
+            **kwargs,
+            _has_implementation=True,
+        )
         self.procedures.append(procedure)
         return procedure
 
@@ -155,12 +163,12 @@ class service:
     def procedure[I, O](
         self,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ) -> typing.Callable[[_function["_session.Almanet", I, O]], procedure_model[I, O]]: ...
+    ) -> typing.Callable[[_function[I, "_session.Almanet", O]], procedure_model[I, O]]: ...
 
     @typing.overload
     def procedure[I, O](
         self,
-        function: _function["_session.Almanet", I, O],
+        function: _function[I, "_session.Almanet", O],
     ) -> procedure_model[I, O]: ...
 
     def procedure(
@@ -228,18 +236,16 @@ class service:
 
         self._share_self_schema()
 
-        for registration in self.procedures:
+        for procedure in self.procedures:
             for session in session_pool.sessions:
                 session.register(
-                    registration.uri,
-                    registration.function,
+                    procedure.uri,
+                    procedure.function,
                     channel=self.channel,
                 )
 
-            if registration.include_to_api:
-                self._share_procedure_schema(
-                    registration,
-                )
+            if procedure.include_to_api:
+                self._share_procedure_schema(procedure)
 
 
 new_service = service
