@@ -6,6 +6,7 @@ from . import _shared
 __all__ = [
     "session_pool",
     "new_session_pool",
+    "acquire_active_session",
 ]
 
 
@@ -62,5 +63,5 @@ _current_session_pool = _shared.new_concurrent_context()
 def acquire_active_session() -> _session.Almanet:
     pool = _current_session_pool.get(None)
     if pool is None:
-        return _session.get_current_session()
+        return _session.get_active_session()
     return pool.rotate()
