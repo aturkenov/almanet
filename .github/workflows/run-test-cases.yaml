@@ -1,0 +1,16 @@
+name: run test cases
+on:
+  push:
+    paths:
+      - '**.py'
+
+jobs:
+  testing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - name: setup docker buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Run test cases
+        run: docker build -f testing.dockerfile .

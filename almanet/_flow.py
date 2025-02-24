@@ -5,11 +5,13 @@ import typing
 from . import _shared
 
 if typing.TYPE_CHECKING:
+    from . import _session
     from . import _service
 
 __all__ = [
-    "observable_state",
     "transition",
+    "observable_state",
+    "new_observable_state",
     "next_observer",
 ]
 
@@ -18,7 +20,7 @@ _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
 
-@_shared.dataclass(slots=True)
+@_shared.dataclass
 class transition:
     label: str
     sources: set["observable_state"]
@@ -26,23 +28,17 @@ class transition:
     procedure: typing.Callable
     description: str | None = None
     priority: int = -1
+    is_observer: bool = False
 
-    @property
-    def __name__(self) -> str:
-        return self.label
-
-    @property
-    def __doc__(self) -> str | None:
-        return self.description
-
-    @property
-    def is_observer(self) -> bool:
-        return self.priority > -1
+    def __post_init__(self):
+        self.__name__ = self.label
+        self.__doc__ = self.description
+        self.is_observer = self.priority > -1
 
     async def __call__(
         self,
         payload: typing.Any = ...,
-        /,
+        *,
         context: typing.Any = ...,
     ):
         if context is ...:
@@ -57,7 +53,7 @@ _state_label_re = re.compile("[A-Za-z0-9_]+")
 
 @_shared.dataclass(slots=True)
 class _state:
-    service: "_service.service_model"
+    service: "_service.service"
     label: str
     description: str | None = None
     _transitions: typing.List[transition] = ...
@@ -133,6 +129,7 @@ class observable_state(_state):
 
     async def next(
         self,
+        session: "_session.Almanet",
         context,
     ) -> typing.Any:
         _logger.debug(f"{self.label} begin")
@@ -151,8 +148,7 @@ class observable_state(_state):
 
     def __post_init__(self):
         super(observable_state, self).__post_init__()
-        # TODO: better to consume
-        self.service.register_procedure(
+        self.service.add_procedure(
             self.next,
             path=self.label,
             include_to_api=False,
@@ -163,7 +159,8 @@ class observable_state(_state):
         self,
         context,
     ):
-        self.service.session.call(self.service._make_uri(self.label), context)
+        next_uri = ".".join([self.service.pre, self.label])
+        self.service.session.call(next_uri, context)
 
     def _add_observer(
         self,
@@ -195,6 +192,9 @@ class observable_state(_state):
 
     def __hash__(self) -> int:
         return hash(self.label)
+
+
+new_observable_state = observable_state
 
 
 class next_observer(Exception):
