@@ -186,6 +186,7 @@ class Almanet:
         self._leave_event = _shared.observable()
         self._pending_replies: typing.MutableMapping[str, asyncio.Future[reply_event_model]] = {}
         self._invocations_relay = asyncio.Event()
+        self._invocations_relay.set()
 
     @property
     def version(self) -> float:
@@ -570,7 +571,7 @@ class Almanet:
         await self._client.close()
 
         # some tasks have not been completed yet
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(1)
 
         logger.warning(f"session {self.id} left")
 
