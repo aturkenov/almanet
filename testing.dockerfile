@@ -17,13 +17,10 @@ ENV POETRY_HOME=/opt/poetry
 RUN pip install poetry
 RUN poetry config virtualenvs.create false
 
-COPY pyproject.toml poetry.lock .
-RUN poetry install --with testing --no-interaction
+COPY pyproject.toml poetry.lock ./
+RUN poetry install --with testing --no-interaction --no-root
 
 COPY . .
 
-RUN ls -la
-
 RUN nsqd &\
-    python -m examples.microservice.__server &\
-    pytest
+    pytest -x
