@@ -9,8 +9,9 @@ if typing.TYPE_CHECKING:
     from . import _service
 
 __all__ = [
-    "observable_state",
     "transition",
+    "observable_state",
+    "new_observable_state",
     "next_observer",
 ]
 
@@ -197,6 +198,9 @@ class observable_state(_state):
 
     def __hash__(self) -> int:
         return hash(self.label)
+
+
+new_observable_state = observable_state
 
 
 class next_observer(Exception):
