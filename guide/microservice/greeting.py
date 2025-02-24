@@ -12,7 +12,7 @@ class access_denied(almanet.rpc_error):
     """Custom RPC exception"""
 
 
-@service.abstract_procedure
+@service.public_procedure
 async def greet(payload: str) -> str:
     """
     Procedure that returns greeting message.

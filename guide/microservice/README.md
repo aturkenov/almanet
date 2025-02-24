@@ -36,7 +36,7 @@ class access_denied(almanet.rpc_error):
     """Custom RPC exception"""
 
 
-@service.abstract_procedure
+@service.public_procedure
 async def greet(payload: str) -> str:
     """
     Procedure that returns greeting message.
@@ -49,7 +49,7 @@ async def greet(payload: str) -> str:
 Use `almanet.new_service` function to create a new service.
 
 Then declare the `greet` function that accepts and returns a string as payload,
-then decorate it with the `@service.abstract_procedure` decorator.
+then decorate it with the `@service.public_procedure` decorator.
 
 Defined payload and return type annotations are used to validate the input and output of the `greet` function.
 

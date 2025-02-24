@@ -28,13 +28,13 @@ class create_invoice_payload(pydantic.BaseModel):
     expiration_days: int = 7
 
 
-@service.abstract_procedure
+@service.public_procedure
 async def create_invoice(payload: create_invoice_payload) -> UUID: ...
 
 
-@service.abstract_procedure
+@service.public_procedure
 async def cancel_invoice(payload: UUID) -> None: ...
 
 
-@service.abstract_procedure
+@service.public_procedure
 async def get_invoice(payload: UUID) -> invoice_model: ...

@@ -1,4 +1,4 @@
-# Flow Microservice
+# Invoice Flow Microservice
 
 The flow microservice is a microservice that provides a state machine for a flow. It defines the initial state, intermediate states, and final state.
 
