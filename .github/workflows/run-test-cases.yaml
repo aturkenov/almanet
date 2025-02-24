@@ -1,8 +1,8 @@
 name: run tests
 on:
-  pull_request:
+  push:
     paths:
-      - '**.js'
+      - '**.py'
 
 jobs:
   build:
