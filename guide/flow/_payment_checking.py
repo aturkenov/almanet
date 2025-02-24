@@ -18,7 +18,8 @@ class payment_not_found(almanet.rpc_error):
         self.invoice_id = invoice_id
 
 
-@state_payment_checking.observe(_waiting_for_payment.state_waiting_for_payment)
+@__flow.public.check_payment.implements
+@state_payment_checking.transition_from(_waiting_for_payment.state_waiting_for_payment)
 @__flow.invoice_stage
 async def check_payment(
     invoice: __flow.public.invoice_model,

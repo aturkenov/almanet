@@ -20,7 +20,7 @@ _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
 
-@_shared.dataclass(slots=True)
+@_shared.dataclass
 class transition:
     label: str
     sources: set["observable_state"]
@@ -28,23 +28,17 @@ class transition:
     procedure: typing.Callable
     description: str | None = None
     priority: int = -1
+    is_observer: bool = False
 
-    @property
-    def __name__(self) -> str:
-        return self.label
-
-    @property
-    def __doc__(self) -> str | None:
-        return self.description
-
-    @property
-    def is_observer(self) -> bool:
-        return self.priority > -1
+    def __post_init__(self):
+        self.__name__ = self.label
+        self.__doc__ = self.description
+        self.is_observer = self.priority > -1
 
     async def __call__(
         self,
         payload: typing.Any = ...,
-        /,
+        *,
         context: typing.Any = ...,
     ):
         if context is ...:

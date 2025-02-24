@@ -8,8 +8,6 @@ __all__ = [
     "new_service",
 ]
 
-type _function[*I, O] = typing.Callable[[*I], typing.Awaitable[O]]
-
 
 class _function[I, O](typing.Protocol):
     __name__: str
