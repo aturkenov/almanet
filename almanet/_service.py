@@ -3,21 +3,27 @@ import typing
 from . import _shared
 from . import _session_pool
 
-if typing.TYPE_CHECKING:
-    from . import _session
-
 __all__ = [
     "service",
     "new_service",
 ]
 
-type _function[*I, O] = typing.Callable[[*I], typing.Awaitable[O]]
+
+class _function[I, O](typing.Protocol):
+    __name__: str
+
+    async def __call__(
+        self,
+        payload: I,
+        *args,
+        **kwargs,
+    ) -> O: ...
 
 
 @_shared.dataclass
 class procedure_model[I, O]:
     service: "service"
-    function: _function[I, "_session.Almanet", O]
+    function: _function[I, O]
     path: str = ...
     description: str | None = None
     tags: set[str] = ...
@@ -58,11 +64,11 @@ class procedure_model[I, O]:
         if self._has_implementation:
             return self.function(payload, session=session)
 
-        return session.call(self.uri, payload)
+        return session.call(self.uri, payload, result_model=self.return_model)
 
     def implements(
         self,
-        real_function: _function[I, "_session.Almanet", O],
+        real_function: _function[I, O],
     ) -> "procedure_model[I, O]":
         if self._has_implementation:
             raise ValueError("procedure already implemented")
@@ -125,18 +131,18 @@ class service:
         return_model: typing.NotRequired[typing.Any]
 
     @typing.overload
-    def abstract_procedure[I, O](
+    def public_procedure[I, O](
         self,
         function: _function[I, O],
     ) -> procedure_model[I, O]: ...
 
     @typing.overload
-    def abstract_procedure[I, O](
+    def public_procedure[I, O](
         self,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
     ) -> typing.Callable[[_function[I, O]], procedure_model[I, O]]: ...
 
-    def abstract_procedure(
+    def public_procedure(
         self,
         function = None,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
@@ -163,12 +169,12 @@ class service:
     def procedure[I, O](
         self,
         **kwargs: typing.Unpack[_register_procedure_kwargs],
-    ) -> typing.Callable[[_function[I, "_session.Almanet", O]], procedure_model[I, O]]: ...
+    ) -> typing.Callable[[_function[I, O]], procedure_model[I, O]]: ...
 
     @typing.overload
     def procedure[I, O](
         self,
-        function: _function[I, "_session.Almanet", O],
+        function: _function[I, O],
     ) -> procedure_model[I, O]: ...
 
     def procedure(
