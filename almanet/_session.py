@@ -185,7 +185,7 @@ class Almanet:
         self._post_join_event = _shared.observable()
         self._leave_event = _shared.observable()
         self._pending_replies: typing.MutableMapping[str, asyncio.Future[reply_event_model]] = {}
-        self._invocations_switch = _shared.switch()
+        self._invocations_relay = asyncio.Event()
 
     @property
     def version(self) -> float:
@@ -475,7 +475,7 @@ class Almanet:
         messages_stream, _ = await self.consume(f"_rpc_.{registration.uri}", registration.channel)
         async for message in messages_stream:
             self._background_tasks.schedule(self._handle_invocation(registration, message))
-            await self._invocations_switch.access()
+            await self._invocations_relay.wait()
         logger.debug(f"consumer {registration.uri} down")
 
     def register(
@@ -540,7 +540,7 @@ class Almanet:
         if not self.joined:
             await self.join(*self.addresses)
 
-        _current_session.set(self)
+        _active_session.set(self)
 
         return self
 
@@ -557,14 +557,14 @@ class Almanet:
 
         logger.debug(f"trying to leave {self.id} session, reason: {reason}")
 
-        self._invocations_switch.off()
+        self._invocations_relay.clear()
 
         logger.debug(f"session {self.id} await task pool complete")
         await self._background_tasks.complete()
 
         self._leave_event.notify()
 
-        self._invocations_switch.on()
+        self._invocations_relay.set()
 
         logger.debug(f"session {self.id} trying to close connection")
         await self._client.close()
@@ -575,7 +575,7 @@ class Almanet:
         logger.warning(f"session {self.id} left")
 
     async def __aexit__(self, etype, evalue, etraceback) -> None:
-        _current_session.set(None)
+        _active_session.set(None)
 
         if self.joined:
             await self.leave()
@@ -584,11 +584,11 @@ class Almanet:
 new_session = Almanet
 
 
-_current_session = _shared.new_concurrent_context()
+_active_session = _shared.new_concurrent_context()
 
 
-def get_current_session() -> Almanet:
-    session = _current_session.get(None)
+def get_active_session() -> Almanet:
+    session = _active_session.get(None)
     if session is None:
         raise RuntimeError("active session not found")
     return session
