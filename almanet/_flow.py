@@ -39,12 +39,15 @@ class transition:
         self,
         payload: typing.Any = ...,
         *,
-        context: typing.Any = ...,
+        context: typing.MutableMapping | None = None,
+        session: "_session.Almanet",
     ):
-        if context is ...:
-            context = {"payload": payload}
-        result = await self.procedure(payload, context=context, transition=self)
-        self.target.notify(context)
+        if context is None:
+            context = {}
+        if payload is not ...:
+            context["payload"] = payload
+        result = await self.procedure(payload, context=context, session=session, transition=self)
+        session.call(self.target._next_procedure.uri, context)
         return result
 
 
@@ -123,21 +126,23 @@ class flow_execution_error(Exception): ...
 
 @_shared.dataclass(slots=True)
 class observable_state(_state):
+    _next_procedure: "_service.procedure_model" = ...
+
     @property
     def observers(self) -> list[transition]:
         return [i for i in self._transitions if i.is_observer]
 
     async def next(
         self,
+        context: typing.MutableMapping,
         session: "_session.Almanet",
-        context,
     ) -> typing.Any:
         _logger.debug(f"{self.label} begin")
 
         for observer in self.observers:
             _logger.debug(f"trying to call {observer.label} observer")
             try:
-                result = await observer(context=context)
+                result = await observer(context=context, session=session)
                 _logger.debug(f"{observer.label} observer end")
                 return result
             except Exception as e:
@@ -148,19 +153,12 @@ class observable_state(_state):
 
     def __post_init__(self):
         super(observable_state, self).__post_init__()
-        self.service.add_procedure(
+        self._next_procedure = self.service.add_procedure(
             self.next,
             path=self.label,
             include_to_api=False,
             validate=False,
         )
-
-    def notify(
-        self,
-        context,
-    ):
-        next_uri = ".".join([self.service.pre, self.label])
-        self.service.session.call(next_uri, context)
 
     def _add_observer(
         self,
