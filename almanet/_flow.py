@@ -37,17 +37,12 @@ class transition:
 
     async def __call__(
         self,
-        payload: typing.Any = ...,
+        payload: typing.Any = None,
         *,
-        context: typing.MutableMapping | None = None,
         session: "_session.Almanet",
     ):
-        if context is None:
-            context = {}
-        if payload is not ...:
-            context["payload"] = payload
-        result = await self.procedure(payload, context=context, session=session, transition=self)
-        session.call(self.target._next_procedure.uri, context)
+        result = await self.procedure(payload, session=session, transition=self)
+        session.call(self.target._next_procedure.uri, result)
         return result
 
 
@@ -134,7 +129,8 @@ class observable_state(_state):
 
     async def next(
         self,
-        context: typing.MutableMapping,
+        payload: typing.Any = None,
+        *,
         session: "_session.Almanet",
     ) -> typing.Any:
         _logger.debug(f"{self.label} begin")
@@ -142,7 +138,7 @@ class observable_state(_state):
         for observer in self.observers:
             _logger.debug(f"trying to call {observer.label} observer")
             try:
-                result = await observer(context=context, session=session)
+                result = await observer(payload=payload, session=session)
                 _logger.debug(f"{observer.label} observer end")
                 return result
             except Exception as e:

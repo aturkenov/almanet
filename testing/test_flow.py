@@ -1,5 +1,4 @@
 import asyncio
-import typing
 
 import almanet
 
@@ -16,11 +15,10 @@ completed_state = new_state("COMPLETED")
 @ready_state.transition_from(initial_state)
 async def make_ready(
     payload: str,
-    context: typing.MutableMapping,
     session: almanet.Almanet,
     transition: almanet.transition,
 ):
-    context["value"] = payload
+    return payload
 
 
 expected_value = "Hello, Almanet!"
@@ -29,11 +27,10 @@ expected_value = "Hello, Almanet!"
 @completed_state.observe(ready_state)
 async def _complete(
     payload: str,
-    context: typing.MutableMapping,
     session: almanet.Almanet,
     transition: almanet.transition,
 ):
-    assert context["value"] == expected_value
+    assert payload == expected_value
 
 
 @testing_service.post_join
