@@ -5,6 +5,7 @@ from . import _session
 from . import _shared
 
 __all__ = [
+    "rpc_exception",
     "invalid_rpc_payload",
     "invalid_rpc_return",
     "remote_procedure_model",
@@ -13,16 +14,38 @@ __all__ = [
 ]
 
 
-class invalid_rpc_payload(_session.rpc_exception, _shared.invalid_payload): ...
+class rpc_exception(_session.base_rpc_exception):
+    """
+    Represents an RPC exception.
+    You can inherit from this class to create your own exceptions.
+    """
+
+    payload: typing.Any
+
+    def __init__(
+        self,
+        payload = None,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(payload, *args, **kwargs)
+        payload_annotation = self.__annotations__.get("payload", ...)
+        serialize_payload = _shared.serialize(payload_annotation)
+        self.payload = serialize_payload(payload)
 
 
-class invalid_rpc_return(_session.rpc_exception, _shared.invalid_payload): ...
+class invalid_rpc_payload(rpc_exception):
+    payload: str
+
+
+class invalid_rpc_return(rpc_exception):
+    payload: str
 
 
 @_shared.dataclass(kw_only=True, slots=True)
 class remote_procedure_model[I, O](_shared.procedure_model[I, O]):
     service: "remote_service"
-    exceptions: set[type[_session.rpc_exception]] = ...
+    exceptions: set[type[rpc_exception]] = ...
     include_to_api: bool = False
     _has_implementation: bool = False
 
@@ -58,10 +81,10 @@ class remote_procedure_model[I, O](_shared.procedure_model[I, O]):
 
         try:
             return await session.call(self.uri, payload, result_model=self.return_model)
-        except _session.rpc_exception as e:
+        except _session.base_rpc_exception as e:
             for etype in self.exceptions:
                 if e.name == etype.__name__:
-                    raise etype(*e.args)
+                    raise etype(e.payload)
             raise e
 
     def implements(
@@ -129,7 +152,7 @@ class remote_service:
         validate: typing.NotRequired[bool]
         payload_model: typing.NotRequired[typing.Any]
         return_model: typing.NotRequired[typing.Any]
-        exceptions: typing.NotRequired[set[type[_session.rpc_exception]]]
+        exceptions: typing.NotRequired[set[type[rpc_exception]]]
 
     @typing.overload
     def public_procedure[I, O](

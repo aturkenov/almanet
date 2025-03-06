@@ -13,10 +13,8 @@ async def main():
         # catching rpc exceptions with `try` and `except almanet.rpc_exception` statement
         try:
             result = await guide.microservice.greet(payload)
-            # or calling the procedure by URI (Uniform Resource Identifier)
-            # result = await session.call("guide.microservice.greeting.greet", payload)
             print(result)
-        except almanet.rpc_exception as e:
+        except guide.microservice.access_denied as e:
             print(f"during call {guide.microservice.greet.uri}({payload}): {e}")
 
 
