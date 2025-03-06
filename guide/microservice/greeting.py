@@ -10,9 +10,10 @@ service = almanet.new_remote_service(__name__)
 
 class access_denied(almanet.rpc_exception):
     """Custom RPC exception"""
+    payload: str
 
 
-@service.public_procedure
+@service.public_procedure(exceptions={access_denied})
 async def greet(payload: str) -> str:
     """
     Procedure that returns greeting message.

@@ -7,7 +7,8 @@ import pytest
 import almanet
 
 
-class denied(almanet.rpc_exception): ...
+class denied(almanet.rpc_exception):
+    payload: str
 
 
 GREET_URI = "net.example.greet"
@@ -18,7 +19,7 @@ async def greet(
     **kwargs,
 ) -> str:
     if payload == "guest":
-        raise denied()
+        raise denied(payload)
     return f"Hello, {payload}!"
 
 
@@ -51,7 +52,7 @@ async def test_rpc(
             await session.call("net.example.not_exist", True, timeout=1)
 
         # catching rpc exceptions
-        with pytest.raises(almanet.rpc_exception):
+        with pytest.raises(almanet.base_rpc_exception):
             await session.call(GREET_URI, "guest")
 
         # sequential calls - stress test
