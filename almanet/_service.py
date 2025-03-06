@@ -9,7 +9,7 @@ __all__ = [
     "invalid_rpc_return",
     "remote_procedure_model",
     "remote_service",
-    "new_service",
+    "new_remote_service",
 ]
 
 
@@ -263,4 +263,4 @@ class remote_service:
             self._share_self_schema()
 
 
-new_service = remote_service
+new_remote_service = remote_service

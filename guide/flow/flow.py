@@ -10,7 +10,7 @@ __all__ = [
     "cancel_invoice",
 ]
 
-service = almanet.new_service(__name__)
+service = almanet.new_remote_service(__name__)
 
 
 class invoice_model(pydantic.BaseModel):
