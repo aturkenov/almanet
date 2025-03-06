@@ -11,10 +11,13 @@ __all__ = [
 
 
 class session_pool:
-
     def __init__(self):
         self.joined = False
         self.sessions: list[_session.Almanet] = []
+
+    @property
+    def count(self) -> int:
+        return len(self.sessions)
 
     async def spawn(
         self,
@@ -24,10 +27,12 @@ class session_pool:
         if number_of_sessions < 1:
             raise ValueError("number_of_sessions must be greater than 0")
 
-        for _ in range(number_of_sessions):
-            session = _session.new_session()
-            await session.join(*addresses)
-            self.sessions.append(session)
+        async with asyncio.TaskGroup() as g:
+            for _ in range(number_of_sessions):
+                session = _session.new_session()
+                self.sessions.append(session)
+                coroutine = session.join(*addresses)
+                g.create_task(coroutine)
 
         self.joined = True
 

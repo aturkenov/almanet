@@ -29,10 +29,10 @@ __all__ = [
     "greet",
 ]
 
-service = almanet.new_service(__name__)
+service = almanet.new_remote_service(__name__)
 
 
-class access_denied(almanet.rpc_error):
+class access_denied(almanet.rpc_exception):
     """Custom RPC exception"""
 
 
@@ -46,7 +46,7 @@ async def greet(payload: str) -> str:
     """
 ```
 
-Use `almanet.new_service` function to create a new service.
+Use `almanet.new_remote_service` function to create a new service.
 
 Then declare the `greet` function that accepts and returns a string as payload,
 then decorate it with the `@service.public_procedure` decorator.

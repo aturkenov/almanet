@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "almanet"
-version = "0.9.3"
+version = "1.0.0"
 description = "Web Messaging Protocol"
 authors = ["aturkenov"]
 readme = "README.md"
@@ -54,9 +54,9 @@ reportAssignmentType = "warning"
 reportUnsupportedDunderAll = "none"
 
 [tool.pytest.ini_options]
-log_cli = "true"
-log_cli_level = "DEBUG"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+log_cli = "true"
+log_cli_level = "DEBUG"
 pythonpath = "./"
 testpaths = "./testing"

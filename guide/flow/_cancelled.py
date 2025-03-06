@@ -22,7 +22,7 @@ async def mark_as_cancelled(
 ): ...
 
 
-class invoice_cancelled(almanet.rpc_error):
+class invoice_cancelled(almanet.rpc_exception):
     def __init__(
         self,
         invoice_id: UUID,
