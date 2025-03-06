@@ -12,5 +12,5 @@ async def _greet(
         # you can raise custom exceptions
         # and the caller will have an error
         # see more about catching errors in `~/guide/calling/caller.py` file.
-        raise public.access_denied()
+        raise public.access_denied(payload)
     return f"Hello, {payload}!"

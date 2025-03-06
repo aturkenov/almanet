@@ -15,7 +15,7 @@ __all__ = [
     "invoke_event_model",
     "qmessage_model",
     "reply_event_model",
-    "rpc_exception",
+    "base_rpc_exception",
     "Almanet",
     "new_session",
 ]
@@ -99,21 +99,17 @@ class reply_event_model:
     payload: typing.Any
 
 
-class rpc_exception(Exception):
-    """
-    Represents an RPC exception.
-    You can inherit from this class to create your own exceptions.
-    """
+class base_rpc_exception(Exception):
 
-    __slots__ = ("name", "args")
+    __slots__ = ("name", "payload")
 
     def __init__(
         self,
-        *args,
+        payload: typing.Any,
         name: str | None = None,
     ) -> None:
         self.name = name or self.__class__.__name__
-        self.args = args
+        self.payload = payload
 
 
 @_shared.dataclass(slots=True)
@@ -144,17 +140,17 @@ class registration_model:
             )
             return reply_event_model(call_id=invocation.id, is_exception=False, payload=reply_payload)
         except Exception as e:
-            if isinstance(e, rpc_exception):
+            if isinstance(e, base_rpc_exception):
                 error_name = e.name
-                error_message = e.args
+                error_payload = e.payload
             else:
                 error_name = "InternalError"
-                error_message = "oops"
+                error_payload = "oops"
                 logger.exception("during execute procedure", extra=__log_extra)
             return reply_event_model(
                 call_id=invocation.id,
                 is_exception=True,
-                payload={"name": error_name, "message": error_message},
+                payload={"name": error_name, "payload": error_payload},
             )
 
 
@@ -318,8 +314,8 @@ class Almanet:
                 logger.debug("new reply event", extra=__log_extra)
 
                 if reply_event.is_exception:
-                    raise rpc_exception(
-                        reply_event.payload.get("message"),
+                    raise base_rpc_exception(
+                        reply_event.payload.get("payload"),
                         name=reply_event.payload.get("name"),
                     )
 
