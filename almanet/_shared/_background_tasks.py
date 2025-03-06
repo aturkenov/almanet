@@ -36,11 +36,14 @@ class background_tasks:
             self._daemons.add(task)
         return task
 
-    async def complete(self) -> None:
+    async def complete(
+        self,
+        timeout: float | None = None,
+    ) -> None:
         """
         Awaits the completion of all non-daemon tasks in the pool.
         This method will block until all non-daemon tasks have finished executing.
         """
         pending_tasks = self._tasks - self._daemons
         if len(pending_tasks) > 0:
-            await asyncio.wait(pending_tasks)
+            await asyncio.wait(pending_tasks, timeout=timeout)

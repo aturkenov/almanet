@@ -10,18 +10,19 @@ if typing.TYPE_CHECKING:
     from . import _service
 
 __all__ = [
+    "logger",
     "client_iface",
     "invoke_event_model",
     "qmessage_model",
     "reply_event_model",
-    "rpc_error",
+    "rpc_exception",
     "Almanet",
     "new_session",
 ]
 
 
 logger = logging.getLogger("almanet")
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 
 @_shared.dataclass(slots=True)
@@ -94,14 +95,14 @@ class reply_event_model:
     """
 
     call_id: str
-    is_error: bool
+    is_exception: bool
     payload: typing.Any
 
 
-class rpc_error(Exception):
+class rpc_exception(Exception):
     """
-    Represents an RPC error.
-    You can inherit from this class to create your own error.
+    Represents an RPC exception.
+    You can inherit from this class to create your own exceptions.
     """
 
     __slots__ = ("name", "args")
@@ -113,9 +114,6 @@ class rpc_error(Exception):
     ) -> None:
         self.name = name or self.__class__.__name__
         self.args = args
-
-    def __str__(self) -> str:
-        return f"{self.name}{self.args}"
 
 
 @_shared.dataclass(slots=True)
@@ -139,26 +137,23 @@ class registration_model:
     ) -> reply_event_model:
         __log_extra = {"registration": str(self), "invocation": str(invocation)}
         try:
-            logger.debug("trying to execute procedure", extra=__log_extra)
+            logger.debug(f"trying to execute procedure {self.uri}", extra=__log_extra)
             reply_payload = await self.procedure(
                 invocation.payload,
                 session=self.session,
             )
-            return reply_event_model(call_id=invocation.id, is_error=False, payload=reply_payload)
+            return reply_event_model(call_id=invocation.id, is_exception=False, payload=reply_payload)
         except Exception as e:
-            if isinstance(e, rpc_error):
+            if isinstance(e, rpc_exception):
                 error_name = e.name
                 error_message = e.args
-            elif isinstance(e, pydantic_core.ValidationError):
-                error_name = "ValidationError"
-                error_message = repr(e)
             else:
                 error_name = "InternalError"
                 error_message = "oops"
                 logger.exception("during execute procedure", extra=__log_extra)
             return reply_event_model(
                 call_id=invocation.id,
-                is_error=True,
+                is_exception=True,
                 payload={"name": error_name, "message": error_message},
             )
 
@@ -182,11 +177,9 @@ class Almanet:
             client_class = _clients.DEFAULT_CLIENT
         self._client: client_iface = client_class()
         self._background_tasks = _shared.background_tasks()
-        self._post_join_event = _shared.observable()
-        self._leave_event = _shared.observable()
+        self._post_join_event = _shared.observable_event()
+        self._leave_event = _shared.observable_event()
         self._pending_replies: typing.MutableMapping[str, asyncio.Future[reply_event_model]] = {}
-        self._invocations_relay = asyncio.Event()
-        self._invocations_relay.set()
 
     @property
     def version(self) -> float:
@@ -250,11 +243,16 @@ class Almanet:
         logger.debug(f"trying to consume {topic}/{channel}")
 
         messages_stream, stop_consumer = await self._client.consume(topic, channel)
-        self._leave_event.add_observer(stop_consumer)
 
         messages_stream = self._serialize(messages_stream, payload_model)
 
-        return messages_stream, stop_consumer
+        def __stop_consumer():
+            logger.warning(f"trying to stop consumer {topic}")
+            stop_consumer()
+
+        self._leave_event.add_observer(__stop_consumer)
+
+        return messages_stream, __stop_consumer
 
     async def _consume_replies(
         self,
@@ -305,8 +303,8 @@ class Almanet:
             reply_topic=f"_rpc_._reply_.{self.id}",
         )
 
-        __log_extra = {"uri": uri, "timeout": timeout, "invoke_event": str(invocation)}
-        logger.debug("trying to call", extra=__log_extra)
+        __log_extra = {"timeout": timeout, "invoke_event": str(invocation)}
+        logger.debug(f"trying to call {uri}", extra=__log_extra)
 
         pending_reply_event = asyncio.Future[reply_event_model]()
         self._pending_replies[invocation.id] = pending_reply_event
@@ -319,10 +317,10 @@ class Almanet:
                 __log_extra["reply_event"] = str(reply_event)
                 logger.debug("new reply event", extra=__log_extra)
 
-                if reply_event.is_error:
-                    raise rpc_error(
-                        reply_event.payload["message"],
-                        name=reply_event.payload["name"],
+                if reply_event.is_exception:
+                    raise rpc_exception(
+                        reply_event.payload.get("message"),
+                        name=reply_event.payload.get("name"),
                     )
 
                 return reply_event
@@ -347,7 +345,7 @@ class Almanet:
 
     async def _call[I, O](
         self,
-        topic: typing.Union[str, "_service.procedure_model[I, O]"],
+        topic: typing.Union[str, "_service.remote_procedure_model[I, O]"],
         payload: I,
         **kwargs: typing.Unpack[_call_kwargs],
     ) -> O:
@@ -375,7 +373,7 @@ class Almanet:
     @typing.overload
     def call[I, O](
         self,
-        topic: "_service.procedure_model[I, O]",
+        topic: "_service.remote_procedure_model[I, O]",
         payload: I,
         **kwargs: typing.Unpack[_call_kwargs],
     ) -> asyncio.Task[O]: ...
@@ -445,7 +443,7 @@ class Almanet:
         """
         return self._background_tasks.schedule(self._multicall_only(*args, **kwargs))
 
-    async def _handle_invocation(
+    async def __on_message(
         self,
         registration: registration_model,
         message: qmessage_model,
@@ -460,7 +458,7 @@ class Almanet:
                 logger.warning("invocation expired", extra=__log_extra)
             else:
                 reply = await registration.execute(invocation)
-                logger.debug("trying to reply", extra=__log_extra)
+                logger.debug(f"trying to reply {registration.uri}", extra=__log_extra)
                 await self.produce(invocation.reply_topic, reply)
         except:
             logger.exception("during execute invocation", extra=__log_extra)
@@ -475,8 +473,9 @@ class Almanet:
         logger.debug(f"trying to register {registration.uri}/{registration.channel}")
         messages_stream, _ = await self.consume(f"_rpc_.{registration.uri}", registration.channel)
         async for message in messages_stream:
-            self._background_tasks.schedule(self._handle_invocation(registration, message))
-            await self._invocations_relay.wait()
+            self._background_tasks.schedule(self.__on_message(registration, message))
+            if not self.joined:
+                break
         logger.debug(f"consumer {registration.uri} down")
 
     def register(
@@ -492,6 +491,8 @@ class Almanet:
         """
         if not self.joined:
             raise RuntimeError(f"session {self.id} not joined")
+
+        logger.debug(f"scheduling registration {topic}")
 
         registration = registration_model(
             uri=topic,
@@ -534,7 +535,7 @@ class Almanet:
         await consume_replies_ready.wait()
 
         self.joined = True
-        self._post_join_event.notify()
+        await self._post_join_event.notify()
         logger.info(f"session {self.id} joined")
 
     async def __aenter__(self) -> "Almanet":
@@ -548,6 +549,7 @@ class Almanet:
     async def leave(
         self,
         reason: str | None = None,
+        timeout: float = 60,
     ) -> None:
         """
         Leave the session from message broker.
@@ -558,20 +560,13 @@ class Almanet:
 
         logger.debug(f"trying to leave {self.id} session, reason: {reason}")
 
-        self._invocations_relay.clear()
-
         logger.debug(f"session {self.id} await task pool complete")
-        await self._background_tasks.complete()
+        await self._background_tasks.complete(timeout=timeout)
 
-        self._leave_event.notify()
-
-        self._invocations_relay.set()
+        await self._leave_event.notify(timeout=timeout)
 
         logger.debug(f"session {self.id} trying to close connection")
         await self._client.close()
-
-        # some tasks have not been completed yet
-        await asyncio.sleep(1)
 
         logger.warning(f"session {self.id} left")
 

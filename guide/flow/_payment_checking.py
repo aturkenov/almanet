@@ -10,7 +10,7 @@ __all__ = ["state_payment_checking"]
 state_payment_checking = __flow.new_state(__flow.public.service, "PAYMENT_CHECKING")
 
 
-class payment_not_found(almanet.rpc_error):
+class payment_not_found(almanet.rpc_exception):
     def __init__(
         self,
         invoice_id: UUID,

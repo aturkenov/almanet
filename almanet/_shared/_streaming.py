@@ -34,7 +34,8 @@ async def merge_streams(*streams):
                 active = False
                 continue
             yield result
-            next_value(task)
+            if active:
+                next_value(task)
 
     for task in pending_tasks:
         task.cancel()

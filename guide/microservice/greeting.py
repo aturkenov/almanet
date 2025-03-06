@@ -5,10 +5,10 @@ __all__ = [
     "greet",
 ]
 
-service = almanet.new_service(__name__)
+service = almanet.new_remote_service(__name__)
 
 
-class access_denied(almanet.rpc_error):
+class access_denied(almanet.rpc_exception):
     """Custom RPC exception"""
 
 

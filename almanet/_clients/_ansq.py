@@ -12,7 +12,6 @@ __all__ = ["ansq_client"]
 
 
 class ansq_client:
-
     async def connect(
         self,
         addresses: typing.Sequence[str],
@@ -34,7 +33,7 @@ class ansq_client:
 
     async def _convert_ansq_message(
         self,
-        ansq_messages_stream: typing.AsyncIterable['NSQMessage'],
+        ansq_messages_stream: typing.AsyncIterable["NSQMessage"],
     ) -> typing.AsyncIterable[_session.qmessage_model[bytes]]:
         async for ansq_message in ansq_messages_stream:
             almanet_message = _session.qmessage_model(
@@ -53,10 +52,7 @@ class ansq_client:
         channel: str,
     ) -> _session.returns_consumer[bytes]:
         reader = await ansq.create_reader(
-            nsqd_tcp_addresses=self.addresses,
-            topic=topic,
-            channel=channel,
-            connection_options=ansq.ConnectionOptions()
+            nsqd_tcp_addresses=self.addresses, topic=topic, channel=channel, connection_options=ansq.ConnectionOptions()
         )
         messages_stream = reader.messages()
         messages_stream = self._convert_ansq_message(messages_stream)

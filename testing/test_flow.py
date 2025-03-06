@@ -3,7 +3,7 @@ import asyncio
 import almanet
 
 
-testing_service = almanet.service("net.testing.microservice")
+testing_service = almanet.remote_service("net.testing.microservice")
 
 new_state = lambda label: almanet.observable_state(testing_service, label)
 initial_state = new_state("INITIAL")
@@ -38,7 +38,7 @@ async def __post_join(session: almanet.Almanet):
     await make_ready(expected_value)
 
 
-async def test_microservice():
+async def test_flow():
     almanet.serve(
         "localhost:4150",
         services=[testing_service],

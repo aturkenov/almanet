@@ -29,7 +29,7 @@ async def main():
         try:
             result = await guide.microservice.greet("Aidar")  # Call the greeting procedure
             print(f"Result: {result}")  # Print the Result: 'Hello, Aidar'
-        except almanet.rpc_error as e:
+        except almanet.rpc_exception as e:
             print(f"Error calling procedure: {e}")
 
 if __name__ == '__main__':
