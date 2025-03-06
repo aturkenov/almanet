@@ -51,7 +51,7 @@ _state_label_re = re.compile("[A-Za-z0-9_]+")
 
 @_shared.dataclass(slots=True)
 class _state:
-    service: "_service.service"
+    service: "_service.remote_service"
     label: str
     description: str | None = None
     _transitions: typing.List[transition] = ...
@@ -121,7 +121,7 @@ class flow_execution_error(Exception): ...
 
 @_shared.dataclass(slots=True)
 class observable_state(_state):
-    _next_procedure: "_service.procedure_model" = ...
+    _next_procedure: "_service.remote_procedure_model" = ...
 
     @property
     def observers(self) -> list[transition]:
@@ -151,7 +151,7 @@ class observable_state(_state):
         super(observable_state, self).__post_init__()
         self._next_procedure = self.service.add_procedure(
             self.next,
-            path=self.label,
+            name=self.label,
             include_to_api=False,
             validate=False,
         )

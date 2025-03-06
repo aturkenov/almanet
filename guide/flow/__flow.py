@@ -42,8 +42,7 @@ async def save_invoice(
     raise NotImplementedError()
 
 
-class transition_denied(almanet.rpc_error):
-
+class transition_denied(almanet.rpc_exception):
     def __init__(
         self,
         invoice_id: UUID,
@@ -55,9 +54,7 @@ class transition_denied(almanet.rpc_error):
         self.expected_states = expected_states
 
     def __str__(self) -> str:
-        return f'invoice_id={self.invoice_id}' \
-        f' current_state={self.current_state}' \
-        f' expected_states={self.expected_states}'
+        return f"invoice_id={self.invoice_id} current_state={self.current_state} expected_states={self.expected_states}"
 
     __repr__ = __str__
 
@@ -71,10 +68,7 @@ def invoice_stage(function):
     ):
         invoice = await get_invoice(payload)
 
-        if not (
-            state_any in transition.sources
-            or invoice.state in {i.label for i in transition.sources}
-        ):
+        if not (state_any in transition.sources or invoice.state in {i.label for i in transition.sources}):
             raise transition_denied(invoice.id, invoice.state, transition.sources)
 
         await function(invoice, context=context, transition=transition)
@@ -82,4 +76,5 @@ def invoice_stage(function):
         await save_invoice(invoice)
 
         return payload
+
     return decorator

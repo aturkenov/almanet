@@ -32,7 +32,7 @@ __all__ = [
 service = almanet.new_service(__name__)
 
 
-class access_denied(almanet.rpc_error):
+class access_denied(almanet.rpc_exception):
     """Custom RPC exception"""
 
 

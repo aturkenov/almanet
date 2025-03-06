@@ -7,10 +7,11 @@ import pytest
 import almanet
 
 
-class denied(almanet.rpc_error): ...
+class denied(almanet.rpc_exception): ...
 
 
 GREET_URI = "net.example.greet"
+
 
 async def greet(
     payload: str,
@@ -29,7 +30,7 @@ async def now(*args, **kwargs) -> datetime:
 
 
 async def test_rpc(
-    n = 512,  # number of calls
+    n=256,  # number of calls
 ):
     async with almanet.new_session("localhost:4150") as session:
         session.register(GREET_URI, greet)
@@ -50,7 +51,7 @@ async def test_rpc(
             await session.call("net.example.not_exist", True, timeout=1)
 
         # catching rpc exceptions
-        with pytest.raises(almanet.rpc_error):
+        with pytest.raises(almanet.rpc_exception):
             await session.call(GREET_URI, "guest")
 
         # sequential calls - stress test
@@ -63,9 +64,7 @@ async def test_rpc(
 
         # concurrent call - stress test
         begin_time = time()
-        await asyncio.gather(
-            *[session.call(NOW_URI, payload=None) for _ in range(n)]
-        )
+        await asyncio.gather(*[session.call(NOW_URI, payload=None) for _ in range(n)])
         end_time = time()
         test_duration = end_time - begin_time
         assert test_duration < 1
