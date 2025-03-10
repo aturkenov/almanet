@@ -9,7 +9,7 @@ from . import _decoding
 __all__ = [
     "extract_annotations",
     "generate_json_schema",
-    "describe_function",
+    "generate_function_json_schema",
     "invalid_payload",
     "invalid_return",
     "validate_execution",
@@ -41,8 +41,9 @@ def generate_json_schema(annotation):
     return model.json_schema()
 
 
-def describe_function(
+def generate_function_json_schema(
     target: typing.Callable,
+    custom_name: str = ...,
     custom_description: str | None = None,
     custom_payload_annotation=...,
     custom_return_annotation=...,
@@ -50,6 +51,8 @@ def describe_function(
     """
     Generates a JSON schema from a function.
     """
+    if custom_name is ...:
+        custom_name = target.__name__
     if custom_description is None:
         custom_description = target.__doc__
     custom_payload_annotation, custom_return_annotation = extract_annotations(
@@ -58,9 +61,10 @@ def describe_function(
     payload_json_schema = generate_json_schema(custom_payload_annotation)
     return_json_schema = generate_json_schema(custom_return_annotation)
     return {
+        "name": custom_name,
         "description": custom_description,
-        "payload_json_schema": payload_json_schema,
-        "return_json_schema": return_json_schema,
+        "payload": payload_json_schema,
+        "return": return_json_schema,
     }
 
 
@@ -74,6 +78,7 @@ def validate_execution(
     function,
     custom_payload_model=...,
     custom_return_model=...,
+    json_payload=False,
 ):
     """
     Takes a function as input and returns a decorator.
@@ -85,7 +90,10 @@ def validate_execution(
     - custom_return_model: the model of the output
     """
     custom_payload_model, custom_return_model = extract_annotations(function, custom_payload_model, custom_return_model)
-    payload_validator = _decoding.serialize(custom_payload_model)
+    if json_payload:
+        payload_validator = _decoding.serialize_json(custom_payload_model)
+    else:
+        payload_validator = _decoding.serialize(custom_payload_model)
     return_validator = _decoding.serialize(custom_return_model)
 
     async def decorator(payload, *args, **kwargs):
@@ -124,28 +132,31 @@ class procedure_model[I, O]:
     description: str | None = None
     tags: set[str] = ...
     validate: bool = True
+    json_payload: bool = False
     payload_model: typing.Any = ...
     return_model: typing.Any = ...
     exceptions: set[type[Exception]] = ...
-    _schema: typing.Mapping = ...
+    json_schema: typing.Mapping = ...
 
     def __post_init__(self):
         if not callable(self.function):
             raise ValueError("decorated function must be callable")
-        if not isinstance(self.name, str):
-            self.name = self.function.__name__
         self.payload_model, self.return_model = extract_annotations(
             self.function, self.payload_model, self.return_model
         )
-        self._schema = describe_function(
+        self.json_schema = generate_function_json_schema(
             self.function,
+            self.name,
             self.description,
             custom_payload_annotation=self.payload_model,
             custom_return_annotation=self.return_model,
         )
-        self.description = self._schema["description"]
+        self.name = self.json_schema["name"]
+        self.description = self.json_schema["description"]
         if self.validate:
-            self.function = validate_execution(self.function, self.payload_model, self.return_model)
+            self.function = validate_execution(
+                self.function, self.payload_model, self.return_model, json_payload=self.json_payload
+            )
         if self.exceptions is ...:
             self.exceptions = set()
         if self.tags is ...:

@@ -24,7 +24,7 @@ class rpc_exception(_session.base_rpc_exception):
 
     def __init__(
         self,
-        payload = None,
+        payload=None,
         *args,
         **kwargs,
     ):
@@ -246,10 +246,8 @@ class remote_service:
                 "session_version": self.session.version,
                 "uri": registration.uri,
                 "validate": registration.validate,
-                "payload_model": registration.payload_model,
-                "return_model": registration.return_model,
                 "tags": tags,
-                **registration._schema,
+                **registration.json_schema,
             }
 
         self.session.register(
