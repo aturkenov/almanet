@@ -1,51 +1,72 @@
 import typing
 
+import pydantic_core
+
 from . import _session_pool
 from . import _session
 from . import _shared
 
 __all__ = [
-    "rpc_exception",
-    "invalid_rpc_payload",
-    "invalid_rpc_return",
+    "remote_exception",
+    "rpc_invalid_payload",
+    "rpc_invalid_return",
     "remote_procedure_model",
     "remote_service",
     "new_remote_service",
 ]
 
 
-class rpc_exception(_session.base_rpc_exception):
+class remote_exception(_session.rpc_exception):
     """
-    Represents an RPC exception.
+    Represents an remote procedure call exception.
     You can inherit from this class to create your own exceptions.
     """
 
     payload: typing.Any
 
-    def __init__(
-        self,
-        payload=None,
+    @classmethod
+    def _serialize(
+        klass,
+        raw_payload: bytes,
         *args,
         **kwargs,
-    ):
-        super().__init__(payload, *args, **kwargs)
-        payload_annotation = self.__annotations__.get("payload", ...)
-        serialize_payload = _shared.serialize(payload_annotation)
-        self.payload = serialize_payload(payload)
+    ) -> typing.Self:
+        """
+        Returns instance of the class with the serialized payload.
+
+        Raises:
+        - pydantic_code.ValidationError
+        """
+        model = klass.__annotations__.get("payload", ...)
+        serializer = _shared.serialize_json(model)
+        payload = serializer(raw_payload)
+        return klass(payload)
 
 
-class invalid_rpc_payload(rpc_exception):
-    payload: str
+class rpc_invalid_payload(remote_exception):
+    """
+    Represents an invalid payload for a remote procedure call.
+    """
+
+    payload: typing.Any
 
 
-class invalid_rpc_return(rpc_exception):
-    payload: str
+class rpc_invalid_return(remote_exception):
+    """
+    Represents an invalid return value for a remote procedure call.
+    """
+
+
+class rpc_invalid_exception_payload(rpc_invalid_payload):
+    """
+    Represents an invalid payload for remote exception.
+    """
 
 
 @_shared.dataclass(kw_only=True, slots=True)
 class remote_procedure_model[I, O](_shared.procedure_model[I, O]):
     service: "remote_service"
-    exceptions: set[type[rpc_exception]] = ...
+    exceptions: set[type[remote_exception]] = ...
     include_to_api: bool = False
     _has_implementation: bool = False
 
@@ -55,37 +76,78 @@ class remote_procedure_model[I, O](_shared.procedure_model[I, O]):
 
     def __post_init__(self):
         super(remote_procedure_model, self).__post_init__()
-        self.exceptions.add(invalid_rpc_payload)
-        self.exceptions.add(invalid_rpc_return)
+        self.exceptions.add(rpc_invalid_payload)
+        self.exceptions.add(rpc_invalid_return)
 
-    async def __call__(
+    def execute(
         self,
         payload: I,
-        *args,
-        session: _session.Almanet | None = None,
-        _force_local: bool = True,
-        **kwargs,
-    ) -> O:
-        _session.logger.debug(f"Calling {self.uri}")
+        session: _session.Almanet,
+    ) -> typing.Awaitable[O]:
+        return self.function(payload, session)
 
-        if session is None:
-            session = _session_pool.acquire_active_session()
-
-        if self._has_implementation and _force_local:
-            try:
-                return await super(remote_procedure_model, self).__call__(payload, *args, session=session, **kwargs)
-            except _shared.invalid_payload as e:
-                raise invalid_rpc_payload(*e.args)
-            except _shared.invalid_return as e:
-                raise invalid_rpc_return(*e.args)
+    async def _remote_execution(
+        self,
+        payload: bytes,
+        session: _session.Almanet,
+    ) -> bytes:
+        """
+        if called remotely
+        """
+        _session.logger.debug(f"remote calling {self.uri}")
 
         try:
-            return await session.call(self.uri, payload, result_model=self.return_model)
-        except _session.base_rpc_exception as e:
+            __payload = self._serialize_payload(payload)
+        except pydantic_core.ValidationError as e:
+            raise rpc_invalid_payload(str(e))
+
+        result = await self.execute(__payload, session)
+
+        assert isinstance(result, self.return_model), rpc_invalid_return()
+
+        result = _shared.dump(result)
+        return result
+
+    class _local_execution_kwargs(_session.Almanet._call_kwargs):
+        force_local: typing.NotRequired[bool]
+
+    async def _local_execution(
+        self,
+        payload: I,
+        **kwargs: typing.Unpack[_local_execution_kwargs],
+    ) -> O:
+        """
+        if called locally
+
+        Args:
+        - force_local: if True, force local execution
+        """
+        _session.logger.debug(f"local calling {self.uri}")
+
+        session = _session_pool.acquire_active_session()
+
+        force_local = kwargs.pop("force_local", True)
+        if self._has_implementation and force_local:
+            return await self.execute(payload, session=session)
+
+        try:
+            reply_event = await session.call(self.uri, payload, **kwargs)
+            return self._serialize_return(reply_event.payload)
+        except _session.rpc_exception as e:
             for etype in self.exceptions:
                 if e.name == etype.__name__:
-                    raise etype(e.payload)
+                    try:
+                        raise etype._serialize(e.payload)
+                    except pydantic_core.ValidationError as e:
+                        raise rpc_invalid_exception_payload(str(e))
             raise e
+
+    def __call__(
+        self,
+        payload: I,
+        **kwargs: typing.Unpack[_local_execution_kwargs],
+    ) -> typing.Awaitable[O]:
+        return self._local_execution(payload, **kwargs)
 
     def implements(
         self,
@@ -93,7 +155,6 @@ class remote_procedure_model[I, O](_shared.procedure_model[I, O]):
     ) -> "remote_procedure_model[I, O]":
         if self._has_implementation:
             raise ValueError("procedure already implemented")
-        self._has_implementation = True
 
         procedure = self.service.add_procedure(
             real_function,
@@ -105,6 +166,9 @@ class remote_procedure_model[I, O](_shared.procedure_model[I, O]):
             payload_model=self.payload_model,
             return_model=self.return_model,
         )
+
+        self._has_implementation = True
+
         return procedure
 
 
@@ -132,6 +196,9 @@ class remote_service:
         self,
         function: T,
     ) -> T:
+        """
+        Decorator to register a function to be called after the service is joined.
+        """
         def decorator(
             session_pool: "_session_pool.session_pool",
             *args,
@@ -152,7 +219,7 @@ class remote_service:
         validate: typing.NotRequired[bool]
         payload_model: typing.NotRequired[typing.Any]
         return_model: typing.NotRequired[typing.Any]
-        exceptions: typing.NotRequired[set[type[rpc_exception]]]
+        exceptions: typing.NotRequired[set[type[remote_exception]]]
 
     @typing.overload
     def public_procedure[I, O](
@@ -273,7 +340,7 @@ class remote_service:
             for session in available_sessions:
                 session.register(
                     procedure.uri,
-                    procedure.__call__,
+                    procedure._remote_execution,
                     channel=self.channel,
                 )
 

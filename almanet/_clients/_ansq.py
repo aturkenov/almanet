@@ -50,7 +50,7 @@ class ansq_client:
         self,
         topic: str,
         channel: str,
-    ) -> _session.returns_consumer[bytes]:
+    ) -> _session.returns_consumer:
         reader = await ansq.create_reader(
             nsqd_tcp_addresses=self.addresses, topic=topic, channel=channel, connection_options=ansq.ConnectionOptions()
         )

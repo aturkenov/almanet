@@ -10,7 +10,7 @@ async def main():
     async with session:
         payload = "Aidar"
 
-        # catching rpc exceptions with `try` and `except almanet.rpc_exception` statement
+        # catching rpc exceptions with `try` and `except almanet.remote_exception` statement
         try:
             result = await guide.microservice.greet(payload)
             print(result)
