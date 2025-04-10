@@ -50,7 +50,10 @@ class ansq_client:
         self,
         topic: str,
         channel: str,
+        ephemeral: bool,
     ) -> _session.returns_consumer[bytes]:
+        if ephemeral:
+            topic += "#ephemeral"
         reader = await ansq.create_reader(
             nsqd_tcp_addresses=self.addresses, topic=topic, channel=channel, connection_options=ansq.ConnectionOptions()
         )

@@ -64,6 +64,7 @@ class client_iface(typing.Protocol):
         self,
         topic: str,
         channel: str,
+        ephemeral: bool,
     ) -> returns_consumer[bytes]:
         raise NotImplementedError()
 
@@ -230,6 +231,7 @@ class Almanet:
         topic: str,
         channel: str,
         *,
+        ephemeral: bool = False,
         payload_model: type[T] | typing.Any = ...,
     ) -> returns_consumer[T]:
         """
@@ -238,7 +240,7 @@ class Almanet:
         """
         logger.debug(f"trying to consume {topic}/{channel}")
 
-        messages_stream, stop_consumer = await self._client.consume(topic, channel)
+        messages_stream, stop_consumer = await self._client.consume(topic, channel, ephemeral)
 
         messages_stream = self._serialize(messages_stream, payload_model)
 
