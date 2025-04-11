@@ -259,6 +259,7 @@ class Almanet:
         messages_stream, _ = await self.consume(
             f"_rpc_._reply_.{self.id}",
             channel="rpc-recipient",
+            ephemeral=True,
         )
         logger.debug("reply event consumer begin")
         ready_event.set()
@@ -408,7 +409,11 @@ class Almanet:
 
         __log_extra = {"uri": uri, "timeout": timeout, "invoke_event": str(invocation)}
 
-        messages_stream, stop_consumer = await self.consume(invocation.reply_topic, "rpc-recipient")
+        messages_stream, stop_consumer = await self.consume(
+            invocation.reply_topic,
+            "rpc-recipient",
+            ephemeral=True,
+        )
 
         result = []
         try:
