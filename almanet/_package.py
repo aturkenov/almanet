@@ -1,35 +1,30 @@
 import asyncio
+import multiprocessing
 import signal
 
-from . import _service
-from . import _session_pool
+from . import (
+    _service,
+    _session,
+)
 
-__all__ = ["serve"]
+__all__ = [
+    "serve",
+    "serve_multiple",
+]
 
 
 def serve(
-    *addresses: str,
-    services: list[_service.remote_service] = [],
+    addresses: list[str],
+    service: _service.remote_service,
 ) -> None:
-    if len(addresses) == 0:
-        raise ValueError("must provide at least one address")
-
-    if len(services) == 0:
-        raise ValueError("must provide at least one service")
-
-    for service in services:
-        if not isinstance(service, _service.remote_service):
-            raise ValueError("must be an instance of service")
-
-    session_pool = _session_pool.new_session_pool()
+    session = _session.new_session(*addresses)
 
     async def begin() -> None:
-        await session_pool.spawn(addresses, len(services))
-        for s in services:
-            await s._post_join_event.notify(session_pool)
+        await session.join()
+        await service._post_join_event.notify(session)
 
     async def end() -> None:
-        await session_pool.kill()
+        await session.leave()
         loop.stop()
 
     loop = asyncio.get_event_loop()
@@ -40,3 +35,50 @@ def serve(
     loop.create_task(begin())
     if not loop.is_running():
         loop.run_forever()
+
+
+def _initialize_new_process(
+    addresses: list[str],
+    service_uri: str,
+) -> None:
+    service = _service.get_service(service_uri)
+    if service is None:
+        raise ValueError(f"invalid service type {service_uri=}")
+
+    serve(addresses, service)
+
+
+def serve_multiple(
+    addresses: str,
+    services: list[_service.remote_service] | None = None,
+) -> None:
+    if len(addresses) == 0:
+        raise ValueError("must provide at least one address")
+
+    if services is None or len(services) == 0:
+        raise ValueError("must provide at least one service")
+
+    if not all(isinstance(s, _service.remote_service) for s in services):
+        raise TypeError("all services must be of type remote_service")
+
+    processes: list[multiprocessing.Process] = []
+    for s in services:
+        process = multiprocessing.Process(
+            target=_initialize_new_process,
+            args=(addresses, s.pre),
+        )
+        process.start()
+        processes.append(process)
+
+    has_active_process = True
+    while has_active_process:
+        has_active_process = False
+
+        for process in processes:
+            if not process.is_alive():
+                continue
+
+            try:
+                process.join()
+            except KeyboardInterrupt:
+                has_active_process = True

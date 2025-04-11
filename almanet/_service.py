@@ -1,6 +1,5 @@
 import typing
 
-from . import _session_pool
 from . import _session
 from . import _shared
 
@@ -69,7 +68,7 @@ class remote_procedure_model[I, O](_shared.procedure_model[I, O]):
         _session.logger.debug(f"Calling {self.uri}")
 
         if session is None:
-            session = _session_pool.acquire_active_session()
+            session = _session.get_active_session()
 
         if self._has_implementation and _force_local:
             try:
@@ -111,7 +110,7 @@ class remote_procedure_model[I, O](_shared.procedure_model[I, O]):
 class remote_service:
     def __init__(
         self,
-        prepath: str = "",
+        prepath: str,
         tags: set[str] | None = None,
         include_to_api: bool = False,
     ) -> None:
@@ -123,6 +122,7 @@ class remote_service:
         self.background_tasks = _shared.background_tasks()
         self._post_join_event = _shared.observable_event()
         self._post_join_event.add_observer(self._share_all)
+        _registry[self.pre] = self
 
     @property
     def routes(self) -> set[str]:
@@ -132,16 +132,7 @@ class remote_service:
         self,
         function: T,
     ) -> T:
-        def decorator(
-            session_pool: "_session_pool.session_pool",
-            *args,
-            **kwargs,
-        ):
-            session = session_pool.rotate()
-            coroutine = function(session, *args, **kwargs)
-            self.background_tasks.schedule(coroutine)
-
-        self._post_join_event.add_observer(decorator)
+        self._post_join_event.add_observer(function)
         return function
 
     class _register_procedure_kwargs(typing.TypedDict):
@@ -216,41 +207,43 @@ class remote_service:
 
     def _share_self_schema(
         self,
+        session: _session.Almanet,
         **extra,
     ) -> None:
         async def procedure(*args, **kwargs):
             return {
-                "session_id": self.session.id,
-                "session_version": self.session.version,
+                "session_id": session.id,
+                "session_version": session.version,
                 "routes": list(self.routes),
                 **extra,
             }
 
-        self.session.register(
+        session.register(
             "_schema_.client",
             procedure,
-            channel=self.session.id,
+            channel=session.id,
         )
 
     def _share_procedure_schema(
         self,
+        session: _session.Almanet,
         registration: remote_procedure_model,
     ) -> None:
         tags = registration.tags | self.default_tags
         if len(tags) == 0:
-            tags = {"Default"}
+            tags = {"default"}
 
         async def procedure(*args, **kwargs):
             return {
-                "session_id": self.session.id,
-                "session_version": self.session.version,
+                "session_id": session.id,
+                "session_version": session.version,
                 "uri": registration.uri,
                 "validate": registration.validate,
                 "tags": tags,
                 **registration.json_schema,
             }
 
-        self.session.register(
+        session.register(
             f"_schema_.{registration.uri}.{self.channel}",
             procedure,
             channel=self.channel,
@@ -258,30 +251,33 @@ class remote_service:
 
     def _share_all(
         self,
-        session_pool: "_session_pool.session_pool",
+        session: _session.Almanet,
     ) -> None:
         _session.logger.info(f"Sharing {self.pre} procedures")
 
-        self.session = session_pool.rotate()
-        if session_pool.count > 1:
-            # if there are multiple sessions, we want to share the procedures with all but exclude the current session
-            available_sessions = [i for i in session_pool.sessions if i is not self.session]
-        else:
-            available_sessions = session_pool.sessions
-
         for procedure in self.procedures:
-            for session in available_sessions:
-                session.register(
-                    procedure.uri,
-                    procedure.__call__,
-                    channel=self.channel,
-                )
+            session.register(
+                procedure.uri,
+                procedure.__call__,
+                channel=self.channel,
+            )
 
             if procedure.include_to_api:
-                self._share_procedure_schema(procedure)
+                self._share_procedure_schema(session, procedure)
 
         if self.include_to_api:
-            self._share_self_schema()
+            self._share_self_schema(session)
 
 
 new_remote_service = remote_service
+
+_registry = {}
+
+
+def get_service(
+    uri: str,
+) -> remote_service | None:
+    """
+    Returns the service object for the given uri.
+    """
+    return _registry.get(uri)

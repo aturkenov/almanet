@@ -18,6 +18,7 @@ __all__ = [
     "base_rpc_exception",
     "Almanet",
     "new_session",
+    "get_active_session",
 ]
 
 
@@ -530,6 +531,8 @@ class Almanet:
         )
         await consume_replies_ready.wait()
 
+        _active_session.set(self)
+
         self.joined = True
         await self._post_join_event.notify()
         logger.info(f"session {self.id} joined")
@@ -537,9 +540,6 @@ class Almanet:
     async def __aenter__(self) -> "Almanet":
         if not self.joined:
             await self.join(*self.addresses)
-
-        _active_session.set(self)
-
         return self
 
     async def leave(
@@ -552,6 +552,9 @@ class Almanet:
         """
         if not self.joined:
             raise RuntimeError(f"session {self.id} not joined")
+
+        _active_session.set(None)
+
         self.joined = False
 
         logger.debug(f"trying to leave {self.id} session, reason: {reason}")
@@ -567,14 +570,11 @@ class Almanet:
         logger.warning(f"session {self.id} left")
 
     async def __aexit__(self, etype, evalue, etraceback) -> None:
-        _active_session.set(None)
-
         if self.joined:
             await self.leave()
 
 
 new_session = Almanet
-
 
 _active_session = _shared.new_concurrent_context()
 

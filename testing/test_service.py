@@ -26,6 +26,8 @@ async def greet(
     payload: str,
     session: almanet.Almanet,
 ) -> str:
+    if not isinstance(session, almanet.Almanet):
+        pytest.fail("session is not an instance of almanet")
     if payload == "guest":
         raise access_denied(
             access_denied_payload(
@@ -58,9 +60,9 @@ async def __post_join(session: almanet.Almanet):
         assert isinstance(e.payload.datetime, datetime)
 
 
-async def test_microservice():
+async def test_service():
     almanet.serve(
-        "localhost:4150",
-        services=[testing_service],
+        ["localhost:4150"],
+        testing_service,
     )
     await asyncio.sleep(1)
