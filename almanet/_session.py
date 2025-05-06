@@ -312,7 +312,7 @@ class Almanet:
 
                 return reply_event
         except Exception as e:
-            logger.error(f"during call {uri}", extra={**__log_extra, "error": repr(e)})
+            logger.error(f"during call {uri}: {e!r}", extra={**__log_extra, "error": str(e)})
             raise e
         finally:
             self._pending_replies.pop(invocation.id)

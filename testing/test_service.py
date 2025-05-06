@@ -65,13 +65,16 @@ async def __post_join(session: almanet.Almanet):
 
     try:
         await greet("guest", force_local=False)
+
         raise Exception("invalid behavior")
     # catch custom exception
     except access_denied as e:
         assert isinstance(e.payload.reason, str)
         assert isinstance(e.payload.datetime, datetime)
 
+    almanet.logger.debug("done!!!!!!!!!!!!!!!!")
+
 
 async def test_service():
     almanet.serve_single(["localhost:4150"], testing_service)
-    await asyncio.sleep(1)
+    await asyncio.sleep(4)

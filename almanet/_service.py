@@ -105,8 +105,7 @@ class remote_procedure_model[I, O](_shared.procedure_model[I, O]):
         if not isinstance(result, self.return_model):
             raise rpc_invalid_return()
 
-        result = _shared.dump(result)
-        return result
+        return _shared.dump(result)
 
     class _local_execution_kwargs(_session.Almanet._call_kwargs):
         force_local: typing.NotRequired[bool]
@@ -135,11 +134,12 @@ class remote_procedure_model[I, O](_shared.procedure_model[I, O]):
             return self._serialize_return(reply_event.payload)
         except _session.rpc_exception as e:
             for etype in self.exceptions:
-                if e.name == etype.name:
+                if e.name == etype.__name__:
                     try:
                         raise etype._serialize(e.payload)
                     except pydantic_core.ValidationError as e:
                         raise rpc_invalid_exception_payload(str(e))
+            _session.logger.warning(f"{e.name} exception not define for {self.uri}")
             raise e
 
     def __call__(
@@ -323,7 +323,7 @@ class remote_service:
         for procedure in self.procedures:
             session.register(
                 procedure.uri,
-                procedure.__call__,
+                procedure._remote_execution,
                 channel=self.channel,
             )
 
