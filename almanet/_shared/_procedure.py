@@ -86,8 +86,8 @@ class procedure_model[I, O]:
     return_model: typing.Any = ...
     exceptions: set[type[Exception]] = ...
     json_schema: typing.Mapping = ...
-    _serialize_payload: typing.Callable[[bytes | str], I] = _decoding.serialize_json(...)
-    _serialize_return: typing.Callable[[bytes | str], O] = _decoding.serialize_json(...)
+    _serialize_payload: typing.Callable[[bytes | str], I] = _decoding.serialize_any_json
+    _serialize_return: typing.Callable[[bytes | str], O] = _decoding.serialize_any_json
 
     def __post_init__(self):
         if not callable(self.function):

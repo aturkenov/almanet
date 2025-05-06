@@ -6,6 +6,7 @@ import pydantic_core
 __all__ = [
     "serialize",
     "serialize_json",
+    "serialize_any_json",
 ]
 
 
@@ -27,3 +28,6 @@ def serialize_json[T: typing.Any](
 
     model = pydantic.TypeAdapter(annotation)
     return model.validate_json
+
+
+serialize_any_json = serialize_json(...)

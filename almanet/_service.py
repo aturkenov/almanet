@@ -24,12 +24,12 @@ class remote_exception(_session.rpc_exception):
     payload: typing.Any
 
     @classmethod
-    def _serialize(
+    def _make_from_payload(
         klass,
         raw_payload: bytes,
         *args,
         **kwargs,
-    ) -> typing.Self:
+    ) -> 'remote_exception':
         """
         Returns instance of the class with the serialized payload.
 
@@ -136,7 +136,7 @@ class remote_procedure_model[I, O](_shared.procedure_model[I, O]):
             for etype in self.exceptions:
                 if e.name == etype.__name__:
                     try:
-                        raise etype._serialize(e.payload)
+                        raise etype._make_from_payload(e.payload)
                     except pydantic_core.ValidationError as e:
                         raise rpc_invalid_exception_payload(str(e))
             _session.logger.warning(f"{e.name} exception not define for {self.uri}")
