@@ -59,7 +59,7 @@ class client_iface(typing.Protocol):
         self,
         topic: str,
         channel: str,
-    ) -> returns_consumer:
+    ) -> returns_consumer[bytes]:
         raise NotImplementedError()
 
     async def close(self) -> None:
@@ -171,6 +171,7 @@ class Almanet:
         client_class: type[client_iface] | None = None,
     ) -> None:
         self.id = _shared.new_id()
+        self.reply_topic = f"_rpc_._reply_.{self.id}#ephemeral"
         self.addresses: tuple[str, ...] = addresses
         self.joined = False
         if client_class is None:
@@ -224,7 +225,7 @@ class Almanet:
         Consume messages from a message broker with the specified topic and channel.
         It returns a tuple of a stream of messages and a function that can stop consumer.
         """
-        logger.debug(f"trying to consume {topic}/{channel}")
+        logger.debug(f"trying to consume {topic}:{channel}")
 
         messages_stream, stop_consumer = await self._client.consume(topic, channel)
 
@@ -241,8 +242,8 @@ class Almanet:
         ready_event: asyncio.Event,
     ) -> None:
         messages_stream, _ = await self.consume(
-            f"_rpc_._reply_.{self.id}",
-            channel="rpc-recipient",
+            self.reply_topic,
+            channel="almanet-python#ephemeral",
         )
         logger.debug("reply event consumer begin")
         serializer = _shared.serialize_json(reply_event_model)
@@ -285,7 +286,7 @@ class Almanet:
             id=_shared.new_id(),
             caller_id=self.id,
             payload=payload,
-            reply_topic=f"_rpc_._reply_.{self.id}",
+            reply_topic=self.reply_topic,
         )
 
         __log_extra = {"timeout": timeout, "invoke_event": str(invocation)}
@@ -342,12 +343,15 @@ class Almanet:
             id=_shared.new_id(),
             caller_id=self.id,
             payload=payload,
-            reply_topic=f"_rpc_._replies_.{self.id}",
+            reply_topic=f"_rpc_._replies_.{_shared.new_id()}#ephemeral",
         )
 
         __log_extra = {"uri": uri, "timeout": timeout, "invoke_event": str(invocation)}
 
-        messages_stream, stop_consumer = await self.consume(invocation.reply_topic, "rpc-recipient")
+        messages_stream, stop_consumer = await self.consume(
+            invocation.reply_topic,
+            "almanet-python#ephemeral",
+        )
 
         serializer = _shared.serialize_json(reply_event_model)
 
@@ -410,7 +414,7 @@ class Almanet:
         self,
         registration: registration_model,
     ) -> None:
-        logger.debug(f"trying to register {registration.uri}/{registration.channel}")
+        logger.debug(f"trying to register {registration.uri}:{registration.channel}")
         messages_stream, _ = await self.consume(f"_rpc_.{registration.uri}", registration.channel)
         async for message in messages_stream:
             self._background_tasks.schedule(self._on_message(registration, message))

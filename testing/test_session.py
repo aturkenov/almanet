@@ -72,3 +72,5 @@ async def test_rpc(
         end_time = time()
         test_duration = end_time - begin_time
         assert test_duration < 1
+
+    await asyncio.sleep(1)
