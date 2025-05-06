@@ -1,5 +1,7 @@
 import asyncio
+import os
 import pytest
+import signal
 
 from datetime import datetime
 
@@ -46,6 +48,9 @@ async def greet(
     return f"Hello, {payload}!"
 
 
+_ready_to_close = asyncio.Event()
+
+
 @testing_service.post_join
 async def __post_join(session: almanet.Almanet):
     payload = "Almanet"
@@ -72,9 +77,15 @@ async def __post_join(session: almanet.Almanet):
         assert isinstance(e.payload.reason, str)
         assert isinstance(e.payload.datetime, datetime)
 
-    almanet.logger.debug("done!!!!!!!!!!!!!!!!")
+    _ready_to_close.set()
+
+
+async def _test_interruption_signal():
+    os.kill(os.getpid(), signal.SIGINT)
+    await asyncio.sleep(1)
 
 
 async def test_service():
-    almanet.serve_single(["localhost:4150"], testing_service)
-    await asyncio.sleep(4)
+    almanet.serve_single(["localhost:4150"], testing_service, stop_loop_on_exit=False)
+    await _ready_to_close.wait()
+    await _test_interruption_signal()

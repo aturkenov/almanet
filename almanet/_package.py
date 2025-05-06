@@ -16,7 +16,12 @@ __all__ = [
 def serve_single(
     addresses: list[str],
     service: _service.remote_service,
+    *,
+    stop_loop_on_exit: bool | None = None,
 ) -> None:
+    if stop_loop_on_exit is None:
+        stop_loop_on_exit = True
+
     session = _session.new_session(*addresses)
 
     async def begin() -> None:
@@ -25,7 +30,8 @@ def serve_single(
 
     async def end() -> None:
         await session.leave()
-        loop.stop()
+        if stop_loop_on_exit:
+            loop.stop()
 
     loop = asyncio.get_event_loop()
 
@@ -40,17 +46,19 @@ def serve_single(
 def _initialize_new_process(
     addresses: list[str],
     service_uri: str,
+    **kwargs,
 ) -> None:
     service = _service.get_service(service_uri)
     if service is None:
         raise ValueError(f"invalid service type {service_uri=}")
 
-    serve_single(addresses, service)
+    serve_single(addresses, service, **kwargs)
 
 
 def serve_multiple(
     addresses: list[str],
     services: list[_service.remote_service] | None = None,
+    **kwargs,
 ) -> None:
     if not isinstance(addresses, list) or len(addresses) == 0:
         raise ValueError("`addresses` must be a non empty list of strings")
@@ -66,6 +74,7 @@ def serve_multiple(
         process = multiprocessing.Process(
             target=_initialize_new_process,
             args=(addresses, s.pre),
+            kwargs=kwargs,
         )
         process.start()
         processes.append(process)
