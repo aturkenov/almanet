@@ -16,7 +16,7 @@ def serialize[T: typing.Any](
         return lambda v: v
 
     model = pydantic.TypeAdapter(annotation)
-    return lambda v: model.validate_python(v)
+    return model.validate_python
 
 
 def serialize_json[T: typing.Any](
@@ -26,4 +26,4 @@ def serialize_json[T: typing.Any](
         return lambda v: pydantic_core.from_json(v)
 
     model = pydantic.TypeAdapter(annotation)
-    return lambda v: model.validate_json(v)
+    return model.validate_json

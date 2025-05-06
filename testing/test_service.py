@@ -15,7 +15,7 @@ class access_denied_payload(pydantic.BaseModel):
     datetime: datetime
 
 
-class access_denied(almanet.rpc_exception):
+class access_denied(almanet.remote_exception):
     payload: access_denied_payload
 
 
@@ -35,6 +35,14 @@ async def greet(
                 datetime=datetime.now(),
             )
         )
+    if payload == "not_exist":
+        await asyncio.sleep(2)
+        raise access_denied(
+            access_denied_payload(
+                reason="user not found",
+                datetime=datetime.now(),
+            )
+        )
     return f"Hello, {payload}!"
 
 
@@ -44,15 +52,19 @@ async def __post_join(session: almanet.Almanet):
     expected_result = "Hello, Almanet!"
 
     # happy path
-    result = await greet(payload, _force_local=False)
+    result = await greet(payload, force_local=False)
     assert result == expected_result
 
+    # catch timeout error
+    with pytest.raises(asyncio.TimeoutError):
+        await greet("not_exist", force_local=False, timeout=1)  # type: ignore
+
     # catch validation error
-    with pytest.raises(almanet.invalid_rpc_payload):
-        await greet(123, _force_local=False)  # type: ignore
+    with pytest.raises(almanet.rpc_invalid_payload):
+        await greet(123, force_local=False)  # type: ignore
 
     try:
-        await greet("guest", _force_local=False)
+        await greet("guest", force_local=False)
         raise Exception("invalid behavior")
     # catch custom exception
     except access_denied as e:

@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+import json
 from time import time
 
 import pytest
@@ -15,12 +16,14 @@ GREET_URI = "net.example.greet"
 
 
 async def greet(
-    payload: str,
+    payload: bytes,
     **kwargs,
-) -> str:
-    if payload == "guest":
-        raise denied(payload)
-    return f"Hello, {payload}!"
+) -> bytes:
+    name = json.loads(payload)
+    if name == "guest":
+        raise denied(name)
+    result = f"Hello, {name}!"
+    return result.encode()
 
 
 NOW_URI = "net.example.now"
@@ -39,12 +42,12 @@ async def test_rpc(
 
         # happy path
         result = await session.call(GREET_URI, "Almanet")
-        assert result == "Hello, Almanet!"
+        assert result.payload == b"Hello, Almanet!"
 
         # concurrent calls
         await asyncio.gather(
-            session.call(GREET_URI, payload="test"),
-            session.call(NOW_URI, payload=None),
+            session.call(GREET_URI, "test"),
+            session.call(NOW_URI, None),
         )
 
         # catching timeout exceptions
@@ -52,20 +55,20 @@ async def test_rpc(
             await session.call("net.example.not_exist", True, timeout=1)
 
         # catching rpc exceptions
-        with pytest.raises(almanet.base_rpc_exception):
-            await session.call(GREET_URI, "guest")
+        with pytest.raises(almanet.rpc_exception):
+            await session.call(GREET_URI, b"guest")
 
         # sequential calls - stress test
         begin_time = time()
         for _ in range(n):
-            await session.call(NOW_URI, payload=None)
+            await session.call(NOW_URI, None)
         end_time = time()
         test_duration = end_time - begin_time
         assert test_duration < 1
 
         # concurrent call - stress test
         begin_time = time()
-        await asyncio.gather(*[session.call(NOW_URI, payload=None) for _ in range(n)])
+        await asyncio.gather(*[session.call(NOW_URI, None) for _ in range(n)])
         end_time = time()
         test_duration = end_time - begin_time
         assert test_duration < 1

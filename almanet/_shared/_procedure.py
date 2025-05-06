@@ -1,4 +1,3 @@
-import asyncio
 from dataclasses import dataclass
 import typing
 
@@ -10,9 +9,6 @@ __all__ = [
     "extract_annotations",
     "generate_json_schema",
     "generate_function_json_schema",
-    "invalid_payload",
-    "invalid_return",
-    "validate_execution",
     "_function",
     "procedure_model",
 ]
@@ -68,52 +64,6 @@ def generate_function_json_schema(
     }
 
 
-class invalid_payload(Exception): ...
-
-
-class invalid_return(Exception): ...
-
-
-def validate_execution(
-    function,
-    custom_payload_model=...,
-    custom_return_model=...,
-    json_payload=False,
-):
-    """
-    Takes a function as input and returns a decorator.
-    The decorator validates the input payload and output return of the function based on their annotations.
-
-    Args:
-    - function: the function to decorate with validator
-    - custom_payload_model: the model of the input
-    - custom_return_model: the model of the output
-    """
-    custom_payload_model, custom_return_model = extract_annotations(function, custom_payload_model, custom_return_model)
-    if json_payload:
-        payload_validator = _decoding.serialize_json(custom_payload_model)
-    else:
-        payload_validator = _decoding.serialize(custom_payload_model)
-    return_validator = _decoding.serialize(custom_return_model)
-
-    async def decorator(payload, *args, **kwargs):
-        try:
-            payload = payload_validator(payload)
-        except pydantic.ValidationError as e:
-            raise invalid_payload(str(e))
-
-        result = function(payload, *args, **kwargs)
-        if asyncio.iscoroutine(result):
-            result = await result
-
-        try:
-            return return_validator(result)
-        except pydantic.ValidationError as e:
-            raise invalid_return(str(e))
-
-    return decorator
-
-
 class _function[I, O](typing.Protocol):
     __name__: str
 
@@ -132,11 +82,12 @@ class procedure_model[I, O]:
     description: str | None = None
     tags: set[str] = ...
     validate: bool = True
-    json_payload: bool = False
     payload_model: typing.Any = ...
     return_model: typing.Any = ...
     exceptions: set[type[Exception]] = ...
     json_schema: typing.Mapping = ...
+    _serialize_payload: typing.Callable[[bytes | str], I] = ...
+    _serialize_return: typing.Callable[[bytes | str], O] = ...
 
     def __post_init__(self):
         if not callable(self.function):
@@ -154,13 +105,12 @@ class procedure_model[I, O]:
         self.name = self.json_schema["name"]
         self.description = self.json_schema["description"]
         if self.validate:
-            self.function = validate_execution(
-                self.function, self.payload_model, self.return_model, json_payload=self.json_payload
-            )
+            self._serialize_payload = _decoding.serialize_json(self.payload_model)
+            self._serialize_return = _decoding.serialize_json(self.return_model)
+        else:
+            self._serialize_payload = lambda x: x  # type: ignore
+            self._serialize_return = lambda x: x  # type: ignore
         if self.exceptions is ...:
             self.exceptions = set()
         if self.tags is ...:
             self.tags = set()
-
-    def __call__(self, payload: I, *args, **kwargs) -> typing.Awaitable[O]:
-        return self.function(payload, *args, **kwargs)
