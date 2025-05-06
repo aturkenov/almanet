@@ -6,9 +6,4 @@ from ._success import *
 
 
 if __name__ == '__main__':
-    almanet.serve(
-        "localhost:4150",
-        services=[
-            public.service,
-        ],
-    )
+    almanet.serve_single(["localhost:4150"], public.service)
