@@ -8,12 +8,12 @@ from . import (
 )
 
 __all__ = [
-    "serve",
+    "serve_single",
     "serve_multiple",
 ]
 
 
-def serve(
+def serve_single(
     addresses: list[str],
     service: _service.remote_service,
 ) -> None:
@@ -45,15 +45,15 @@ def _initialize_new_process(
     if service is None:
         raise ValueError(f"invalid service type {service_uri=}")
 
-    serve(addresses, service)
+    serve_single(addresses, service)
 
 
 def serve_multiple(
-    addresses: str,
+    addresses: list[str],
     services: list[_service.remote_service] | None = None,
 ) -> None:
-    if len(addresses) == 0:
-        raise ValueError("must provide at least one address")
+    if not isinstance(addresses, list) or len(addresses) == 0:
+        raise ValueError("`addresses` must be a non empty list of strings")
 
     if services is None or len(services) == 0:
         raise ValueError("must provide at least one service")
@@ -81,4 +81,5 @@ def serve_multiple(
             try:
                 process.join()
             except KeyboardInterrupt:
+                # termination signal to child processes already sent
                 has_active_process = True

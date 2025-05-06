@@ -61,8 +61,5 @@ async def __post_join(session: almanet.Almanet):
 
 
 async def test_service():
-    almanet.serve(
-        ["localhost:4150"],
-        testing_service,
-    )
+    almanet.serve_single(["localhost:4150"], testing_service)
     await asyncio.sleep(1)

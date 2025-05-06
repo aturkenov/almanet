@@ -96,16 +96,14 @@ import almanet
 from . import _greeting
 
 if __name__ == '__main__':
-    almanet.serve(
+    almanet.serve_multiple(
         # message broker addresses
-        "localhost:4150",  # nsqd tcp address
-        services=[
-            _greeting.public.service,
-        ],
+        ["localhost:4150"],  # nsqd tcp addresses
+        services=[_greeting.public.service],
     )
 ```
 
-Start the microservice using the `almanet.serve` function,
+Start the microservice using the `almanet.serve_multiple` function,
 where the `services` parameter is a list of implemented (protected) services.
 
 **Private Module**: This file is private and should not be imported by any other module. It serves solely as the entry point for running the microservice.
