@@ -295,19 +295,18 @@ class Almanet:
 
     def delay_call(
         self,
-        *args: typing.Unpack[_call_args],
+        uri: str,
         delay: int,
+        payload,
     ) -> None:
-        self._background_tasks.schedule(self._delay_call(*args, delay))
+        self._background_tasks.schedule(self._delay_call(uri, payload, delay))
 
     async def _call(
         self,
         uri: str,
         payload,
-        **kwargs: typing.Unpack[_call_kwargs],
+        timeout: int = 60,
     ) -> reply_event_model:
-        timeout = kwargs.get("timeout") or 60
-
         invocation_id = _shared.new_id()
 
         __log_extra = {"uri": uri, "timeout": timeout, "invocation_id": invocation_id}
@@ -345,23 +344,22 @@ class Almanet:
 
     def call(
         self,
-        *args: typing.Unpack[_call_args],
+        uri: str,
+        payload,
         **kwargs: typing.Unpack[_call_kwargs],
     ) -> asyncio.Task[reply_event_model]:
         """
         Executes the remote procedure using the payload.
         Returns a instance of result model.
         """
-        return self._background_tasks.schedule(self._call(*args, **kwargs))
+        return self._background_tasks.schedule(self._call(uri, payload, **kwargs))
 
     async def _multicall(
         self,
         uri: str,
         payload,
-        **kwargs: typing.Unpack[_call_kwargs],
+        timeout: int = 60,
     ) -> list[reply_event_model]:
-        timeout = kwargs.get("timeout") or 60
-
         reply_topic = f"_rpc_._replies_.{_shared.new_id()}#ephemeral"
 
         __log_extra = {"uri": uri, "timeout": timeout, "reply_topic": reply_topic}
@@ -400,13 +398,14 @@ class Almanet:
 
     def multicall(
         self,
-        *args: typing.Unpack[_call_args],
+        uri: str,
+        payload,
         **kwargs: typing.Unpack[_call_kwargs],
     ) -> asyncio.Task[list[reply_event_model]]:
         """
         Execute simultaneously multiple procedures using the payload.
         """
-        return self._background_tasks.schedule(self._multicall(*args, **kwargs))
+        return self._background_tasks.schedule(self._multicall(uri, payload, **kwargs))
 
     async def _on_message(
         self,
