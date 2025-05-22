@@ -43,8 +43,12 @@ class ansqd_tcp_client:
         self,
         topic: str,
         message: str | bytes,
+        delay: int,
     ) -> None:
-        await self.writer.pub(topic, message)
+        if delay > 0:
+            await self.writer.dpub(topic, message, delay)
+        else:
+            await self.writer.pub(topic, message)
 
     async def _convert_ansq_message(
         self,

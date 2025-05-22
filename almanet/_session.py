@@ -18,6 +18,8 @@ __all__ = [
 
 logger = logging.getLogger("almanet")
 
+DEFAULT_CHANNEL = "almanet.python"
+
 
 @_shared.dataclass(slots=True)
 class qmessage_model[T: bytes]:
@@ -53,6 +55,7 @@ class client_iface(typing.Protocol):
         self,
         topic: str,
         message: str | bytes,
+        delay: int,
     ) -> None:
         raise NotImplementedError()
 
@@ -187,6 +190,7 @@ class Almanet:
         self,
         uri: str,
         payload: typing.Any,
+        delay: int = 0,
     ) -> None:
         try:
             message_body = _shared.dump(payload)
@@ -196,7 +200,7 @@ class Almanet:
 
         try:
             logger.debug(f"trying to produce {uri} topic")
-            await self._client.produce(uri, message_body)
+            await self._client.produce(uri, message_body, delay=delay)
         except Exception as e:
             logger.exception(f"during produce {uri} topic")
             raise e
@@ -205,11 +209,12 @@ class Almanet:
         self,
         uri: str,
         payload: typing.Any,
+        delay: int = 0,
     ) -> asyncio.Task[None]:
         """
         Produce a message with a specified topic and payload.
         """
-        return self._background_tasks.schedule(self._produce(uri, payload))
+        return self._background_tasks.schedule(self._produce(uri, payload, delay=delay))
 
     async def consume(
         self,
@@ -238,7 +243,7 @@ class Almanet:
     ) -> None:
         messages_stream, _ = await self.consume(
             self.reply_topic,
-            channel="almanet-python#ephemeral",
+            channel=f"{DEFAULT_CHANNEL}#ephemeral",
         )
         logger.debug("reply event consumer begin")
         serializer = _shared.serialize_json(reply_event_model)
@@ -267,36 +272,61 @@ class Almanet:
     class _call_kwargs(typing.TypedDict):
         timeout: typing.NotRequired[int]
 
-    async def _call(
+    async def _delay_call(
         self,
-        *args: typing.Unpack[_call_args],
-        **kwargs: typing.Unpack[_call_kwargs],
-    ) -> reply_event_model:
-        uri, raw_payload = args
-        timeout = kwargs.get("timeout") or 60
-
-        payload = _shared.dump(raw_payload)
-
+        uri: str,
+        payload: typing.Any,
+        delay: int = 0,
+        /,
+        _invocation_id: str | None = None,
+        _reply_topic: str = "",
+    ) -> None:
         invocation = invoke_event_model(
-            id=_shared.new_id(),
+            id=_invocation_id or _shared.new_id(),
             caller_id=self.id,
-            payload=payload,
-            reply_topic=self.reply_topic,
+            payload=_shared.dump(payload),
+            reply_topic=_reply_topic,
         )
 
-        __log_extra = {"timeout": timeout, "invoke_event": str(invocation)}
-        logger.debug(f"trying to call {uri}", extra=__log_extra)
+        __log_extra = {"invoke_event": str(invocation)}
+        logger.debug(f"trying to call {uri=} {delay=}", extra=__log_extra)
 
-        pending_reply_event = asyncio.Future[reply_event_model]()
-        self._pending_replies[invocation.id] = pending_reply_event
+        await self._produce(f"_rpc_.{uri}", invocation, delay=delay)
+
+    def delay_call(
+        self,
+        *args: typing.Unpack[_call_args],
+        delay: int,
+    ) -> None:
+        self._background_tasks.schedule(self._delay_call(*args, delay))
+
+    async def _call(
+        self,
+        uri: str,
+        payload,
+        **kwargs: typing.Unpack[_call_kwargs],
+    ) -> reply_event_model:
+        timeout = kwargs.get("timeout") or 60
+
+        invocation_id = _shared.new_id()
+
+        __log_extra = {"uri": uri, "timeout": timeout, "invocation_id": invocation_id}
 
         try:
             async with asyncio.timeout(timeout):
-                await self._produce(f"_rpc_.{uri}", invocation)
+                pending_reply_event = asyncio.Future[reply_event_model]()
+                self._pending_replies[invocation_id] = pending_reply_event
+
+                await self._delay_call(
+                    uri,
+                    payload,
+                    _invocation_id=invocation_id,
+                    _reply_topic=self.reply_topic,
+                )
 
                 reply_event = await pending_reply_event
                 __log_extra["reply_event"] = str(reply_event)
-                logger.debug("new reply event", extra=__log_extra)
+                logger.debug(f"invocation {uri=} respond", extra=__log_extra)
 
                 if reply_event.is_exception:
                     serializer = _shared.serialize_json(_reply_exception_model)
@@ -311,7 +341,7 @@ class Almanet:
             logger.error(f"during call {uri}: {e!r}", extra={**__log_extra, "error": str(e)})
             raise e
         finally:
-            self._pending_replies.pop(invocation.id)
+            self._pending_replies.pop(invocation_id)
 
     def call(
         self,
@@ -326,26 +356,19 @@ class Almanet:
 
     async def _multicall(
         self,
-        *args: typing.Unpack[_call_args],
+        uri: str,
+        payload,
         **kwargs: typing.Unpack[_call_kwargs],
     ) -> list[reply_event_model]:
-        uri, raw_payload = args
         timeout = kwargs.get("timeout") or 60
 
-        payload = _shared.dump(raw_payload)
+        reply_topic = f"_rpc_._replies_.{_shared.new_id()}#ephemeral"
 
-        invocation = invoke_event_model(
-            id=_shared.new_id(),
-            caller_id=self.id,
-            payload=payload,
-            reply_topic=f"_rpc_._replies_.{_shared.new_id()}#ephemeral",
-        )
-
-        __log_extra = {"uri": uri, "timeout": timeout, "invoke_event": str(invocation)}
+        __log_extra = {"uri": uri, "timeout": timeout, "reply_topic": reply_topic}
 
         messages_stream, stop_consumer = await self.consume(
-            invocation.reply_topic,
-            "almanet.python#ephemeral",
+            reply_topic,
+            f"{DEFAULT_CHANNEL}#ephemeral"
         )
 
         serializer = _shared.serialize_json(reply_event_model)
@@ -353,7 +376,11 @@ class Almanet:
         result = []
         try:
             async with asyncio.timeout(timeout):
-                await self._produce(f"_rpc_.{uri}", invocation)
+                await self._delay_call(
+                    uri,
+                    payload,
+                    _reply_topic=reply_topic,
+                )
 
                 async for message in messages_stream:
                     try:
@@ -397,8 +424,9 @@ class Almanet:
                 logger.warning("invocation expired", extra=__log_extra)
             else:
                 reply_event = await registration.execute(invocation)
-                logger.debug(f"trying to reply {registration.uri}", extra=__log_extra)
-                await self._produce(invocation.reply_topic, reply_event)
+                if len(invocation.reply_topic) > 0:
+                    logger.debug(f"trying to reply {registration.uri}", extra=__log_extra)
+                    await self._produce(invocation.reply_topic, reply_event)
         except:
             logger.exception("during execute invocation", extra=__log_extra)
         finally:

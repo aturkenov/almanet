@@ -66,6 +66,7 @@ class rpc_invalid_exception_payload(rpc_invalid_payload):
 class remote_procedure_model[I, O](_shared.procedure_model[I, O]):
     service: "remote_service"
     uri: str = ...
+    channel: str = _session.DEFAULT_CHANNEL
     exceptions: set[type[remote_exception]] = ...
     include_to_api: bool = False
     _has_implementation: bool = False
@@ -164,6 +165,9 @@ class remote_procedure_model[I, O](_shared.procedure_model[I, O]):
             validate=self.validate,
             payload_model=self.payload_model,
             return_model=self.return_model,
+            uri=self.uri,
+            channel=self.channel,
+            exceptions=self.exceptions,
         )
 
         self._has_implementation = True
@@ -178,7 +182,6 @@ class remote_service:
         tags: set[str] | None = None,
         include_to_api: bool = False,
     ) -> None:
-        self.channel = "almanet.python"
         self.pre: str = prepath
         self.default_tags: set[str] = set(tags or [])
         self.include_to_api: bool = include_to_api
@@ -190,7 +193,7 @@ class remote_service:
 
     @property
     def routes(self) -> set[str]:
-        return {f"{i.uri}:{self.channel}" for i in self.procedures}
+        return {f"{i.uri}:{i.channel}" for i in self.procedures}
 
     def post_join[T: typing.Callable](
         self,
@@ -208,6 +211,7 @@ class remote_service:
         payload_model: typing.NotRequired[typing.Any]
         return_model: typing.NotRequired[typing.Any]
         uri: typing.NotRequired[str]
+        channel: typing.NotRequired[str]
         exceptions: typing.NotRequired[set[type[remote_exception]]]
 
     @typing.overload
@@ -303,15 +307,16 @@ class remote_service:
                 "session_id": session.id,
                 "session_version": session.version,
                 "uri": registration.uri,
+                "channel": registration.channel,
                 "validate": registration.validate,
                 "tags": tags,
                 **registration.json_schema,
             }
 
         session.register(
-            f"_schema_.{registration.uri}.{self.channel}",
+            f"_schema_.{registration.uri}.{registration.channel}",
             procedure,
-            channel=self.channel,
+            channel=registration.channel,
         )
 
     def _share_all(
@@ -324,7 +329,7 @@ class remote_service:
             session.register(
                 procedure.uri,
                 procedure._remote_execution,
-                channel=self.channel,
+                channel=procedure.channel,
             )
 
             if procedure.include_to_api:
