@@ -345,7 +345,7 @@ class Almanet:
 
         messages_stream, stop_consumer = await self.consume(
             invocation.reply_topic,
-            "almanet-python#ephemeral",
+            "almanet.python#ephemeral",
         )
 
         serializer = _shared.serialize_json(reply_event_model)
