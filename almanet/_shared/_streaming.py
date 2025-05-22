@@ -41,10 +41,10 @@ async def merge_streams(*streams):
         task.cancel()
 
 
-def make_closable(
-    stream,
+def make_closable[T](
+    stream: typing.AsyncIterable[T],
     on_close: typing.Callable | None = None,
-):
+) -> typing.Tuple[typing.AsyncIterable[T], typing.Callable[[], None]]:
     """
     Makes an asynchronous stream closable.
 

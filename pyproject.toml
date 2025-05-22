@@ -53,6 +53,7 @@ typeCheckingMode = "basic"
 reportArgumentType = "warning"
 reportAssignmentType = "warning"
 reportUnsupportedDunderAll = "none"
+reportSelfClsParameterName = false
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

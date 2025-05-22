@@ -2,12 +2,7 @@ import asyncio
 import logging
 import typing
 
-import pydantic_core
-
 from . import _shared
-
-if typing.TYPE_CHECKING:
-    from . import _service
 
 __all__ = [
     "logger",
@@ -15,18 +10,17 @@ __all__ = [
     "invoke_event_model",
     "qmessage_model",
     "reply_event_model",
-    "base_rpc_exception",
+    "rpc_exception",
     "Almanet",
-    "new_session",
+    "get_active_session",
 ]
 
 
 logger = logging.getLogger("almanet")
-logger.setLevel(logging.DEBUG)
 
 
 @_shared.dataclass(slots=True)
-class qmessage_model[T: typing.Any]:
+class qmessage_model[T: bytes]:
     """
     Represents a message in the queue.
     """
@@ -39,7 +33,7 @@ class qmessage_model[T: typing.Any]:
     rollback: typing.Callable[[], typing.Awaitable[None]]
 
 
-type returns_consumer[T: typing.Any] = tuple[typing.AsyncIterable[qmessage_model[T]], typing.Callable[[], None]]
+type returns_consumer[T: bytes] = tuple[typing.AsyncIterable[qmessage_model[T]], typing.Callable[[], None]]
 
 
 class client_iface(typing.Protocol):
@@ -47,9 +41,11 @@ class client_iface(typing.Protocol):
     Interface for a client library.
     """
 
+    def clone(self) -> "client_iface":
+        raise NotImplementedError()
+
     async def connect(
         self,
-        addresses: typing.Sequence[str],
     ) -> None:
         raise NotImplementedError()
 
@@ -79,7 +75,7 @@ class invoke_event_model:
 
     id: str
     caller_id: str
-    payload: typing.Any
+    payload: bytes
     reply_topic: str
 
     @property
@@ -96,20 +92,28 @@ class reply_event_model:
 
     call_id: str
     is_exception: bool
-    payload: typing.Any
+    payload: bytes
 
 
-class base_rpc_exception(Exception):
+@_shared.dataclass(slots=True)
+class _reply_exception_model:
+    name: str
+    payload: bytes
 
+
+class rpc_exception(Exception):
     __slots__ = ("name", "payload")
 
     def __init__(
         self,
-        payload: typing.Any,
+        payload: typing.Any = None,
         name: str | None = None,
     ) -> None:
         self.name = name or self.__class__.__name__
         self.payload = payload
+
+    def __str__(self) -> str:
+        return f"{self.name}: {self.payload}"
 
 
 @_shared.dataclass(slots=True)
@@ -138,20 +142,23 @@ class registration_model:
                 invocation.payload,
                 session=self.session,
             )
-            return reply_event_model(call_id=invocation.id, is_exception=False, payload=reply_payload)
+            is_exception = False
         except Exception as e:
-            if isinstance(e, base_rpc_exception):
-                error_name = e.name
-                error_payload = e.payload
+            is_exception = True
+
+            if isinstance(e, rpc_exception):
+                reply_exception = _reply_exception_model(e.name, _shared.dump(e.payload))
             else:
-                error_name = "InternalError"
-                error_payload = "oops"
                 logger.exception("during execute procedure", extra=__log_extra)
-            return reply_event_model(
-                call_id=invocation.id,
-                is_exception=True,
-                payload={"name": error_name, "payload": error_payload},
-            )
+                reply_exception = _reply_exception_model("InternalError", b"oops")
+
+            reply_payload = _shared.dump(reply_exception)
+
+        return reply_event_model(
+            call_id=invocation.id,
+            is_exception=is_exception,
+            payload=reply_payload,
+        )
 
 
 class Almanet:
@@ -161,17 +168,12 @@ class Almanet:
 
     def __init__(
         self,
-        *addresses: str,
-        client_class: type[client_iface] | None = None,
+        client: client_iface,
     ) -> None:
         self.id = _shared.new_id()
-        self.addresses: tuple[str, ...] = addresses
+        self.reply_topic = f"_rpc_._reply_.{self.id}#ephemeral"
         self.joined = False
-        if client_class is None:
-            from . import _clients
-
-            client_class = _clients.DEFAULT_CLIENT
-        self._client: client_iface = client_class()
+        self._client = client
         self._background_tasks = _shared.background_tasks()
         self._post_join_event = _shared.observable_event()
         self._leave_event = _shared.observable_event()
@@ -209,38 +211,18 @@ class Almanet:
         """
         return self._background_tasks.schedule(self._produce(uri, payload))
 
-    async def _serialize[T: typing.Any](
-        self,
-        messages_stream: typing.AsyncIterable[qmessage_model[bytes]],
-        payload_model: type[T] | typing.Any = ...,
-    ) -> typing.AsyncIterable[qmessage_model[T]]:
-        serializer = _shared.serialize_json(payload_model)
-
-        async for message in messages_stream:
-            try:
-                message.body = serializer(message.body)
-            except:
-                logger.exception("during decode payload")
-                continue
-
-            yield message  # type: ignore
-
-    async def consume[T](
+    async def consume(
         self,
         topic: str,
         channel: str,
-        *,
-        payload_model: type[T] | typing.Any = ...,
-    ) -> returns_consumer[T]:
+    ) -> returns_consumer:
         """
         Consume messages from a message broker with the specified topic and channel.
         It returns a tuple of a stream of messages and a function that can stop consumer.
         """
-        logger.debug(f"trying to consume {topic}/{channel}")
+        logger.debug(f"trying to consume {topic}:{channel}")
 
         messages_stream, stop_consumer = await self._client.consume(topic, channel)
-
-        messages_stream = self._serialize(messages_stream, payload_model)
 
         def __stop_consumer():
             logger.warning(f"trying to stop consumer {topic}")
@@ -255,23 +237,24 @@ class Almanet:
         ready_event: asyncio.Event,
     ) -> None:
         messages_stream, _ = await self.consume(
-            f"_rpc_._reply_.{self.id}",
-            channel="rpc-recipient",
+            self.reply_topic,
+            channel="almanet-python#ephemeral",
         )
         logger.debug("reply event consumer begin")
+        serializer = _shared.serialize_json(reply_event_model)
         ready_event.set()
         async for message in messages_stream:
             __log_extra = {"incoming_message": str(message)}
             try:
-                reply = reply_event_model(**message.body)
-                __log_extra["reply"] = str(reply)
+                reply_event = serializer(message.body)
+                __log_extra["reply_event"] = str(reply_event)
                 logger.debug("new reply", extra=__log_extra)
 
-                pending = self._pending_replies.get(reply.call_id)
+                pending = self._pending_replies.get(reply_event.call_id)
                 if pending is None:
                     logger.warning("pending event not found", extra=__log_extra)
                 else:
-                    pending.set_result(reply)
+                    pending.set_result(reply_event)
             except:
                 logger.exception("during parse reply", extra=__log_extra)
 
@@ -279,24 +262,26 @@ class Almanet:
             logger.debug("successful commit", extra=__log_extra)
         logger.debug("reply event consumer end")
 
-    _call_only_args = tuple[str, typing.Any]
+    _call_args = tuple[str, typing.Any]
 
-    class _call_only_kwargs(typing.TypedDict):
+    class _call_kwargs(typing.TypedDict):
         timeout: typing.NotRequired[int]
 
-    async def _call_only(
+    async def _call(
         self,
-        *args: typing.Unpack[_call_only_args],
-        **kwargs: typing.Unpack[_call_only_kwargs],
+        *args: typing.Unpack[_call_args],
+        **kwargs: typing.Unpack[_call_kwargs],
     ) -> reply_event_model:
-        uri, payload = args
+        uri, raw_payload = args
         timeout = kwargs.get("timeout") or 60
+
+        payload = _shared.dump(raw_payload)
 
         invocation = invoke_event_model(
             id=_shared.new_id(),
             caller_id=self.id,
             payload=payload,
-            reply_topic=f"_rpc_._reply_.{self.id}",
+            reply_topic=self.reply_topic,
         )
 
         __log_extra = {"timeout": timeout, "invoke_event": str(invocation)}
@@ -307,117 +292,74 @@ class Almanet:
 
         try:
             async with asyncio.timeout(timeout):
-                await self.produce(f"_rpc_.{uri}", invocation)
+                await self._produce(f"_rpc_.{uri}", invocation)
 
                 reply_event = await pending_reply_event
                 __log_extra["reply_event"] = str(reply_event)
                 logger.debug("new reply event", extra=__log_extra)
 
                 if reply_event.is_exception:
-                    raise base_rpc_exception(
-                        reply_event.payload.get("payload"),
-                        name=reply_event.payload.get("name"),
+                    serializer = _shared.serialize_json(_reply_exception_model)
+                    reply_exception = serializer(reply_event.payload)
+                    raise rpc_exception(
+                        reply_exception.payload,
+                        name=reply_exception.name,
                     )
 
                 return reply_event
         except Exception as e:
-            logger.error(f"during call {uri}", extra={**__log_extra, "error": repr(e)})
+            logger.error(f"during call {uri}: {e!r}", extra={**__log_extra, "error": str(e)})
             raise e
         finally:
             self._pending_replies.pop(invocation.id)
 
-    def call_only(
+    def call(
         self,
-        *args: typing.Unpack[_call_only_args],
-        **kwargs: typing.Unpack[_call_only_kwargs],
+        *args: typing.Unpack[_call_args],
+        **kwargs: typing.Unpack[_call_kwargs],
     ) -> asyncio.Task[reply_event_model]:
-        """
-        Executes the remote procedure using the payload.
-        """
-        return self._background_tasks.schedule(self._call_only(*args, **kwargs))
-
-    class _call_kwargs[R](_call_only_kwargs):
-        result_model: typing.NotRequired[type[R]]
-
-    async def _call[I, O](
-        self,
-        topic: typing.Union[str, "_service.remote_procedure_model[I, O]"],
-        payload: I,
-        **kwargs: typing.Unpack[_call_kwargs],
-    ) -> O:
-        result_model = kwargs.pop("result_model", ...)
-
-        if isinstance(topic, str):
-            uri = topic
-        else:
-            uri = topic.uri
-            if result_model is ...:
-                result_model = topic.return_model
-
-        serialize_result = _shared.serialize(result_model)
-
-        reply_event = await self._call_only(uri, payload, **kwargs)
-
-        try:
-            result = serialize_result(reply_event.payload)
-        except pydantic_core.ValidationError as e:
-            logger.error(f"invalid result from {uri}", extra={"error": repr(e)})
-            raise e
-
-        return result
-
-    @typing.overload
-    def call[I, O](
-        self,
-        topic: "_service.remote_procedure_model[I, O]",
-        payload: I,
-        **kwargs: typing.Unpack[_call_kwargs],
-    ) -> asyncio.Task[O]: ...
-
-    @typing.overload
-    def call[O](
-        self,
-        topic: str,
-        payload: typing.Any,
-        **kwargs: typing.Unpack[_call_kwargs[O]],
-    ) -> asyncio.Task[O]: ...
-
-    def call(self, *args, **kwargs):
         """
         Executes the remote procedure using the payload.
         Returns a instance of result model.
         """
         return self._background_tasks.schedule(self._call(*args, **kwargs))
 
-    async def _multicall_only(
+    async def _multicall(
         self,
-        *args: typing.Unpack[_call_only_args],
-        **kwargs: typing.Unpack[_call_only_kwargs],
+        *args: typing.Unpack[_call_args],
+        **kwargs: typing.Unpack[_call_kwargs],
     ) -> list[reply_event_model]:
-        uri, payload = args
+        uri, raw_payload = args
         timeout = kwargs.get("timeout") or 60
+
+        payload = _shared.dump(raw_payload)
 
         invocation = invoke_event_model(
             id=_shared.new_id(),
             caller_id=self.id,
             payload=payload,
-            reply_topic=f"_rpc_._replies_.{self.id}",
+            reply_topic=f"_rpc_._replies_.{_shared.new_id()}#ephemeral",
         )
 
         __log_extra = {"uri": uri, "timeout": timeout, "invoke_event": str(invocation)}
 
-        messages_stream, stop_consumer = await self.consume(invocation.reply_topic, "rpc-recipient")
+        messages_stream, stop_consumer = await self.consume(
+            invocation.reply_topic,
+            "almanet-python#ephemeral",
+        )
+
+        serializer = _shared.serialize_json(reply_event_model)
 
         result = []
         try:
             async with asyncio.timeout(timeout):
-                await self.produce(f"_rpc_.{uri}", invocation)
+                await self._produce(f"_rpc_.{uri}", invocation)
 
                 async for message in messages_stream:
                     try:
                         logger.debug("new reply event", extra=__log_extra)
-                        reply = reply_event_model(**message.body)
-                        result.append(reply)
+                        reply_event = serializer(message.body)
+                        result.append(reply_event)
                     except:
                         logger.exception("during parse reply event", extra=__log_extra)
 
@@ -429,33 +371,34 @@ class Almanet:
 
         return result
 
-    def multicall_only(
+    def multicall(
         self,
-        *args: typing.Unpack[_call_only_args],
-        **kwargs: typing.Unpack[_call_only_kwargs],
+        *args: typing.Unpack[_call_args],
+        **kwargs: typing.Unpack[_call_kwargs],
     ) -> asyncio.Task[list[reply_event_model]]:
         """
         Execute simultaneously multiple procedures using the payload.
         """
-        return self._background_tasks.schedule(self._multicall_only(*args, **kwargs))
+        return self._background_tasks.schedule(self._multicall(*args, **kwargs))
 
-    async def __on_message(
+    async def _on_message(
         self,
         registration: registration_model,
-        message: qmessage_model,
+        message: qmessage_model[bytes],
     ):
         __log_extra = {"registration": str(registration), "incoming_message": str(message)}
+        serializer = _shared.serialize_json(invoke_event_model)
         try:
-            invocation = invoke_event_model(**message.body)
+            invocation = serializer(message.body)
             __log_extra["invocation"] = str(invocation)
             logger.debug("new invocation", extra=__log_extra)
 
             if invocation.expired:
                 logger.warning("invocation expired", extra=__log_extra)
             else:
-                reply = await registration.execute(invocation)
+                reply_event = await registration.execute(invocation)
                 logger.debug(f"trying to reply {registration.uri}", extra=__log_extra)
-                await self.produce(invocation.reply_topic, reply)
+                await self._produce(invocation.reply_topic, reply_event)
         except:
             logger.exception("during execute invocation", extra=__log_extra)
         finally:
@@ -466,10 +409,10 @@ class Almanet:
         self,
         registration: registration_model,
     ) -> None:
-        logger.debug(f"trying to register {registration.uri}/{registration.channel}")
+        logger.debug(f"trying to register {registration.uri}:{registration.channel}")
         messages_stream, _ = await self.consume(f"_rpc_.{registration.uri}", registration.channel)
         async for message in messages_stream:
-            self._background_tasks.schedule(self.__on_message(registration, message))
+            self._background_tasks.schedule(self._on_message(registration, message))
             if not self.joined:
                 break
         logger.debug(f"consumer {registration.uri} down")
@@ -503,7 +446,6 @@ class Almanet:
 
     async def join(
         self,
-        *addresses: str,
     ) -> None:
         """
         Join the session to message broker.
@@ -511,17 +453,9 @@ class Almanet:
         if self.joined:
             raise RuntimeError(f"session {self.id} already joined")
 
-        self.addresses += addresses
+        logger.debug("trying to connect")
 
-        if len(self.addresses) == 0:
-            raise ValueError("at least one address must be specified")
-
-        if not all(isinstance(i, str) for i in self.addresses):
-            raise ValueError("addresses must be a iterable of strings")
-
-        logger.debug(f"trying to connect addresses={self.addresses}")
-
-        await self._client.connect(self.addresses)
+        await self._client.connect()
 
         consume_replies_ready = asyncio.Event()
         self._background_tasks.schedule(
@@ -530,16 +464,15 @@ class Almanet:
         )
         await consume_replies_ready.wait()
 
+        _active_session.set(self)
+
         self.joined = True
         await self._post_join_event.notify()
         logger.info(f"session {self.id} joined")
 
     async def __aenter__(self) -> "Almanet":
         if not self.joined:
-            await self.join(*self.addresses)
-
-        _active_session.set(self)
-
+            await self.join()
         return self
 
     async def leave(
@@ -552,6 +485,9 @@ class Almanet:
         """
         if not self.joined:
             raise RuntimeError(f"session {self.id} not joined")
+
+        _active_session.set(None)
+
         self.joined = False
 
         logger.debug(f"trying to leave {self.id} session, reason: {reason}")
@@ -567,13 +503,8 @@ class Almanet:
         logger.warning(f"session {self.id} left")
 
     async def __aexit__(self, etype, evalue, etraceback) -> None:
-        _active_session.set(None)
-
         if self.joined:
             await self.leave()
-
-
-new_session = Almanet
 
 
 _active_session = _shared.new_concurrent_context()

@@ -8,8 +8,9 @@ __all__ = [
 service = almanet.new_remote_service(__name__)
 
 
-class access_denied(almanet.rpc_exception):
+class access_denied(almanet.remote_exception):
     """Custom RPC exception"""
+
     payload: str
 
 
