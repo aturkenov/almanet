@@ -46,7 +46,7 @@ async def test_rpc(
         session.register(GREET_URI, greet)
 
         begin_time = datetime.now()
-        session.delay_call(USE_ASYNCIO_EVENT_URI, delay, None)
+        session.delay_call(USE_ASYNCIO_EVENT_URI, None, delay)
         async with asyncio.timeout(delay + 1):
             await _event.wait()
             end_time = datetime.now()

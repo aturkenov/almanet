@@ -296,8 +296,8 @@ class Almanet:
     def delay_call(
         self,
         uri: str,
-        delay: int,
         payload,
+        delay: int = 0,
     ) -> None:
         self._background_tasks.schedule(self._delay_call(uri, payload, delay))
 
