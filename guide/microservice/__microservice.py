@@ -4,9 +4,7 @@ from . import _greeting
 
 
 if __name__ == '__main__':
-    almanet.serve(
-        "localhost:4150",
-        services=[
-            _greeting.public.service,
-        ],
+    almanet.serve_single(
+        _greeting.public.service,
+        almanet.clients.ansqd_tcp_client("localhost:4150"),
     )

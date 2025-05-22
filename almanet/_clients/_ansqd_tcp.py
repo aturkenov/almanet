@@ -8,17 +8,32 @@ from almanet import _shared
 if typing.TYPE_CHECKING:
     from ansq.tcp.types import NSQMessage
 
-__all__ = ["ansq_client"]
+__all__ = [
+    "ansqd_tcp_client",
+    "make_ansqd_tcp_session",
+]
 
 
-class ansq_client:
-    async def connect(
+class ansqd_tcp_client:
+
+    def __init__(
         self,
-        addresses: typing.Sequence[str],
-    ) -> None:
+        *addresses: str,
+    ):
+        if len(addresses) == 0:
+            raise ValueError("at least one address must be specified")
+
+        if not all(isinstance(i, str) for i in addresses):
+            raise ValueError("addresses must be a iterable of strings")
+
         self.addresses = addresses
+
+    def clone(self) -> "ansqd_tcp_client":
+        return ansqd_tcp_client(*self.addresses)
+
+    async def connect(self) -> None:
         self.writer = await ansq.create_writer(
-            nsqd_tcp_addresses=addresses,
+            nsqd_tcp_addresses=self.addresses,
         )
 
     async def close(self) -> None:
@@ -50,7 +65,7 @@ class ansq_client:
         self,
         topic: str,
         channel: str,
-    ) -> _session.returns_consumer[bytes]:
+    ) -> _session.returns_consumer:
         reader = await ansq.create_reader(
             nsqd_tcp_addresses=self.addresses, topic=topic, channel=channel, connection_options=ansq.ConnectionOptions()
         )
@@ -58,3 +73,8 @@ class ansq_client:
         messages_stream = self._convert_ansq_message(messages_stream)
         # ansq does not close stream automatically
         return _shared.make_closable(messages_stream, reader.close)
+
+
+def make_ansqd_tcp_session(*addresses: str) -> _session.Almanet:
+    client = ansqd_tcp_client(*addresses)
+    return _session.Almanet(client)
