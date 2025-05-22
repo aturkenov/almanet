@@ -65,16 +65,15 @@ class rpc_invalid_exception_payload(rpc_invalid_payload):
 @_shared.dataclass(kw_only=True, slots=True)
 class remote_procedure_model[I, O](_shared.procedure_model[I, O]):
     service: "remote_service"
+    uri: str = ...
     exceptions: set[type[remote_exception]] = ...
     include_to_api: bool = False
     _has_implementation: bool = False
 
-    @property
-    def uri(self):
-        return ".".join([self.service.pre, self.name])
-
     def __post_init__(self):
         super(remote_procedure_model, self).__post_init__()
+        if self.uri is ...:
+            self.uri = ".".join([self.service.pre, self.name])
         self.exceptions.add(rpc_invalid_payload)
         self.exceptions.add(rpc_invalid_return)
 
@@ -179,7 +178,7 @@ class remote_service:
         tags: set[str] | None = None,
         include_to_api: bool = False,
     ) -> None:
-        self.channel = "service"
+        self.channel = "almanet.python"
         self.pre: str = prepath
         self.default_tags: set[str] = set(tags or [])
         self.include_to_api: bool = include_to_api
@@ -208,6 +207,7 @@ class remote_service:
         validate: typing.NotRequired[bool]
         payload_model: typing.NotRequired[typing.Any]
         return_model: typing.NotRequired[typing.Any]
+        uri: typing.NotRequired[str]
         exceptions: typing.NotRequired[set[type[remote_exception]]]
 
     @typing.overload
