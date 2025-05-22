@@ -48,7 +48,7 @@ async def greet(
     return f"Hello, {payload}!"
 
 
-_ready_to_close = asyncio.Event()
+_ready_to_exit = asyncio.Event()
 
 
 @testing_service.post_join
@@ -77,7 +77,7 @@ async def __post_join(session: almanet.Almanet):
         assert isinstance(e.payload.reason, str)
         assert isinstance(e.payload.datetime, datetime)
 
-    _ready_to_close.set()
+    _ready_to_exit.set()
 
 
 async def _test_interruption_signal():
@@ -86,6 +86,10 @@ async def _test_interruption_signal():
 
 
 async def test_service():
-    almanet.serve_single(["localhost:4150"], testing_service, stop_loop_on_exit=False)
-    await _ready_to_close.wait()
+    almanet.serve_single(
+        testing_service,
+        almanet.clients.ansqd_tcp_client("localhost:4150"),
+        stop_loop_on_exit=False,
+    )
+    await _ready_to_exit.wait()
     await _test_interruption_signal()

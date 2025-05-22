@@ -36,7 +36,8 @@ async def now(*args, **kwargs) -> datetime:
 async def test_rpc(
     n=256,  # number of calls
 ):
-    async with almanet.new_session("localhost:4150") as session:
+    session = almanet.clients.make_ansqd_tcp_session("localhost:4150")
+    async with session:
         session.register(GREET_URI, greet)
         session.register(NOW_URI, now)
 

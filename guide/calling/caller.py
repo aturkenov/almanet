@@ -6,7 +6,7 @@ import guide.microservice
 
 async def main():
     # join to your network.
-    session = almanet.new_session("localhost:4150")
+    session = almanet.clients.make_ansqd_tcp_session("localhost:4150")
     async with session:
         payload = "Aidar"
 

@@ -12,7 +12,6 @@ __all__ = [
     "reply_event_model",
     "rpc_exception",
     "Almanet",
-    "new_session",
     "get_active_session",
 ]
 
@@ -42,9 +41,11 @@ class client_iface(typing.Protocol):
     Interface for a client library.
     """
 
+    def clone(self) -> "client_iface":
+        raise NotImplementedError()
+
     async def connect(
         self,
-        addresses: typing.Sequence[str],
     ) -> None:
         raise NotImplementedError()
 
@@ -167,18 +168,12 @@ class Almanet:
 
     def __init__(
         self,
-        *addresses: str,
-        client_class: type[client_iface] | None = None,
+        client: client_iface,
     ) -> None:
         self.id = _shared.new_id()
         self.reply_topic = f"_rpc_._reply_.{self.id}#ephemeral"
-        self.addresses: tuple[str, ...] = addresses
         self.joined = False
-        if client_class is None:
-            from . import _clients
-
-            client_class = _clients.DEFAULT_CLIENT
-        self._client: client_iface = client_class()
+        self._client = client
         self._background_tasks = _shared.background_tasks()
         self._post_join_event = _shared.observable_event()
         self._leave_event = _shared.observable_event()
@@ -451,7 +446,6 @@ class Almanet:
 
     async def join(
         self,
-        *addresses: str,
     ) -> None:
         """
         Join the session to message broker.
@@ -459,17 +453,9 @@ class Almanet:
         if self.joined:
             raise RuntimeError(f"session {self.id} already joined")
 
-        self.addresses += addresses
+        logger.debug("trying to connect")
 
-        if len(self.addresses) == 0:
-            raise ValueError("at least one address must be specified")
-
-        if not all(isinstance(i, str) for i in self.addresses):
-            raise ValueError("addresses must be a iterable of strings")
-
-        logger.debug(f"trying to connect addresses={self.addresses}")
-
-        await self._client.connect(self.addresses)
+        await self._client.connect()
 
         consume_replies_ready = asyncio.Event()
         self._background_tasks.schedule(
@@ -486,7 +472,7 @@ class Almanet:
 
     async def __aenter__(self) -> "Almanet":
         if not self.joined:
-            await self.join(*self.addresses)
+            await self.join()
         return self
 
     async def leave(
@@ -520,8 +506,6 @@ class Almanet:
         if self.joined:
             await self.leave()
 
-
-new_session = Almanet
 
 _active_session = _shared.new_concurrent_context()
 

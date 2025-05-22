@@ -1,8 +1,5 @@
-from ._ansq import *
+from ._ansqd_tcp import *
 
 __all__ = [
-    *_ansq.__all__,
+    *_ansqd_tcp.__all__,
 ]
-
-
-DEFAULT_CLIENT = ansq_client

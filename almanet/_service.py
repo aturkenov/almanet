@@ -26,7 +26,7 @@ class remote_exception(_session.rpc_exception):
     @classmethod
     def _make_from_payload(
         klass,
-        raw_payload: bytes,
+        v: bytes,
         *args,
         **kwargs,
     ) -> 'remote_exception':
@@ -38,7 +38,7 @@ class remote_exception(_session.rpc_exception):
         """
         model = klass.__annotations__.get("payload", ...)
         serializer = _shared.serialize_json(model)
-        payload = serializer(raw_payload)
+        payload = serializer(v)
         return klass(payload)
 
 

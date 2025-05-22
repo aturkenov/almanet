@@ -14,15 +14,15 @@ __all__ = [
 
 
 def serve_single(
-    addresses: list[str],
     service: _service.remote_service,
+    client: _session.client_iface,
     *,
     stop_loop_on_exit: bool | None = None,
 ) -> None:
     if stop_loop_on_exit is None:
         stop_loop_on_exit = True
 
-    session = _session.new_session(*addresses)
+    session = _session.Almanet(client)
 
     async def begin() -> None:
         await session.join()
@@ -44,26 +44,23 @@ def serve_single(
 
 
 def _initialize_new_process(
-    addresses: list[str],
     service_uri: str,
+    *args,
     **kwargs,
 ) -> None:
     service = _service.get_service(service_uri)
     if service is None:
         raise ValueError(f"invalid service type {service_uri=}")
 
-    serve_single(addresses, service, **kwargs)
+    serve_single(service, *args, **kwargs)
 
 
 def serve_multiple(
-    addresses: list[str],
-    services: list[_service.remote_service] | None = None,
+    *services: _service.remote_service,
+    sample_client: _session.client_iface,
     **kwargs,
 ) -> None:
-    if not isinstance(addresses, list) or len(addresses) == 0:
-        raise ValueError("`addresses` must be a non empty list of strings")
-
-    if services is None or len(services) == 0:
+    if len(services) == 0:
         raise ValueError("must provide at least one service")
 
     if not all(isinstance(s, _service.remote_service) for s in services):
@@ -71,9 +68,10 @@ def serve_multiple(
 
     processes: list[multiprocessing.Process] = []
     for s in services:
+        client4process = sample_client.clone()
         process = multiprocessing.Process(
             target=_initialize_new_process,
-            args=(addresses, s.pre),
+            args=(client4process, s.pre),
             kwargs=kwargs,
         )
         process.start()
