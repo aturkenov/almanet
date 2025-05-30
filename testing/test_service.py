@@ -87,8 +87,8 @@ async def _test_interruption_signal():
 
 async def test_service():
     almanet.serve_single(
-        testing_service,
         almanet.clients.ansqd_tcp_client("localhost:4150"),
+        testing_service,
         stop_loop_on_exit=False,
     )
     await _ready_to_exit.wait()
