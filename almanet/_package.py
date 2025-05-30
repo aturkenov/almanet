@@ -14,8 +14,8 @@ __all__ = [
 
 
 def serve_single(
-    service: _service.remote_service,
     client: _session.client_iface,
+    service: _service.remote_service,
     *,
     stop_loop_on_exit: bool | None = None,
 ) -> None:
@@ -44,20 +44,20 @@ def serve_single(
 
 
 def _initialize_new_process(
+    client,
     service_uri: str,
-    *args,
     **kwargs,
 ) -> None:
     service = _service.get_service(service_uri)
     if service is None:
         raise ValueError(f"invalid service type {service_uri=}")
 
-    serve_single(service, *args, **kwargs)
+    serve_single(client, service, **kwargs)
 
 
 def serve_multiple(
-    *services: _service.remote_service,
     sample_client: _session.client_iface,
+    *services: _service.remote_service,
     **kwargs,
 ) -> None:
     if len(services) == 0:
