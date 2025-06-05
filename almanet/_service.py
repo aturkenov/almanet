@@ -29,7 +29,7 @@ class remote_exception(_session.rpc_exception):
         v: bytes,
         *args,
         **kwargs,
-    ) -> 'remote_exception':
+    ) -> "remote_exception":
         """
         Returns instance of the class with the serialized payload.
 
@@ -83,7 +83,7 @@ class remote_procedure_model[I, O](_shared.procedure_model[I, O]):
         payload: I,
         session: _session.Almanet,
     ) -> typing.Awaitable[O]:
-        return self.function(payload, session)
+        return self.function(payload, session=session)
 
     async def _remote_execution(
         self,
@@ -96,14 +96,14 @@ class remote_procedure_model[I, O](_shared.procedure_model[I, O]):
         _session.logger.debug(f"remote calling {self.uri}")
 
         try:
-            __payload = self._serialize_payload(payload)
+            __payload = self.serialize_payload(payload)
         except pydantic_core.ValidationError as e:
             raise rpc_invalid_payload(str(e))
 
         result = await self.execute(__payload, session)
 
-        if not isinstance(result, self.return_model):
-            raise rpc_invalid_return()
+        # if not isinstance(result, self.return_model):
+        #     raise rpc_invalid_return()
 
         return _shared.dump(result)
 
@@ -127,11 +127,11 @@ class remote_procedure_model[I, O](_shared.procedure_model[I, O]):
 
         force_local = kwargs.pop("force_local", True)
         if self._has_implementation and force_local:
-            return await self.execute(payload, session=session)
+            return await self.execute(payload, session)
 
         try:
             reply_event = await session.call(self.uri, payload, **kwargs)
-            return self._serialize_return(reply_event.payload)
+            return self.serialize_return(reply_event.payload)
         except _session.rpc_exception as e:
             for etype in self.exceptions:
                 if e.name == etype.__name__:
